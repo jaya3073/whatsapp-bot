@@ -24,6 +24,10 @@ LEADS_FILE = os.getenv("LEADS_FILE", "whatsapp_leads.xlsx")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
 
+OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
+YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
+WA_CATALOG_LINK = os.getenv("WA_CATALOG_LINK", "https://wa.me/c/918500701521")
+
 sessions = {}
 opted_out = set()
 
@@ -32,8 +36,9 @@ MENU = (
     "1️⃣ ఇల్లు వెతకడం ప్రారంభించండి\n"
     "2️⃣ అందుబాటులో ఉన్న ఇళ్లు చూడండి 🏘️\n"
     "3️⃣ మీటింగ్ బుక్ చేయండి 🚇\n"
-    "4️⃣ శివ గారితో మాట్లాడాలి ☎️\n\n"
-    "దయచేసి సంఖ్య టైప్ చేయండి (1-4)"
+    "4️⃣ శివ గారితో మాట్లాడాలి ☎️\n"
+    "5️⃣ మా OLX / YouTube / Catalogue పేజీలు 🔗\n\n"
+    "దయచేసి సంఖ్య టైప్ చేయండి (1-5)"
 )
 
 
@@ -149,6 +154,14 @@ def route(phone, s, text):
                 "📞 8500701521 (కాల్/వాట్సాప్)\n"
                 "రాకముందు 10 నిమిషాల ముందు కాల్ చేయండి. 🕒"
             )
+        elif text == "5":
+            send(
+                phone,
+                "🔗 మా పేజీలు చూడండి:\n\n"
+                f"🛒 OLX Ads:\n{OLX_LINK}\n\n"
+                f"🎬 YouTube Shorts (ఇళ్ల వీడియోలు):\n{YOUTUBE_LINK}\n\n"
+                f"🛍️ WhatsApp Catalogue:\n{WA_CATALOG_LINK}"
+            )
         else:
             send(phone, MENU)
 
@@ -226,7 +239,8 @@ def done_text(d):
         "మీ వివరాలు నమోదయ్యాయి. ✅\n"
         "మీ బడ్జెట్‌కు సరిపడే ఇల్లు దొరికిన వెంటనే మీకు తెలియజేస్తాము. 🏡\n\n"
         "📍 మీటింగ్ పాయింట్: కూకట్‌పల్లి మెట్రో స్టేషన్\n"
-        "📞 8500701521 (కాల్/వాట్సాప్)"
+        "📞 8500701521 (కాల్/వాట్సాప్)\n"
+        f"🎬 ఇళ్ల వీడియోలు: {YOUTUBE_LINK}"
     )
 
 
@@ -241,7 +255,7 @@ def save_lead(d):
         "move_in": d.get("move_in", ""),
         "source": "whatsapp"
     }
-    push_to_sheet(row)  # ===== Google Sheets కి పంపుతుంది =====
+    push_to_sheet(row)
     try:
         if os.path.exists(LEADS_FILE):
             df = pd.read_excel(LEADS_FILE)
@@ -261,7 +275,7 @@ def save_meeting(phone, d):
         "meeting_time": d.get("meeting_time", ""),
         "type": "meeting"
     }
-    push_to_sheet(row)  # ===== Google Sheets కి పంపుతుంది =====
+    push_to_sheet(row)
     try:
         if os.path.exists(LEADS_FILE):
             df = pd.read_excel(LEADS_FILE)
@@ -305,7 +319,8 @@ def send_listings(phone, d):
             phone,
             "ప్రస్తుతం లిస్ట్ అందుబాటులో లేదు. 🙏\n"
             "ఆప్షన్ 1 ఎంచుకుని మీ వివరాలు పంపండి, "
-            "సరిపడే ఇల్లు దొరికిన వెంటనే తెలియజేస్తాము."
+            "సరిపడే ఇల్లు దొరికిన వెంటనే తెలియజేస్తాము.\n"
+            f"🎬 వీడియోలు: {YOUTUBE_LINK}"
         )
         return
 
@@ -314,8 +329,12 @@ def send_listings(phone, d):
         send(phone, "ప్రస్తుతం లిస్టులు లేవు. 😔\nఆప్షన్ 1 తో మీ వివరాలు పంపండి.")
         return
 
+    has_link = "link" in df.columns
     lines = ["🏘️ అందుబాటులో ఉన్న ఇళ్లు:\n"]
     for _, r in top.iterrows():
-        lines.append(f"• {r['title']} | {r['area']} | ₹{r['budget']} | {r['bhk']}")
-    lines.append("\nనచ్చిందా? మీటింగ్ బుక్ చేయాలంటే 3 టైప్ చేయండి.")
+        line = f"• {r['title']} | {r['area']} | ₹{r['budget']} | {r['bhk']}"
+        if has_link and pd.notna(r.get("link")) and str(r["link"]).strip():
+            line += f"\n  🔗 {r['link']}"
+        lines.append(line)
+    lines.append("\nనచ్చిందా? మీటింగ్ బుక్ చేయాలంటే 3 టైప్ చేయండి.\nమరిన్ని ఇళ్లు: 5 టైప్ చేయండి 🔗")
     send(phone, "\n".join(lines))
