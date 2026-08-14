@@ -1,4 +1,7 @@
 import os
+import re
+import json
+import urllib.request
 import pandas as pd
 from datetime import datetime
 from fastapi import FastAPI, Form, Response
@@ -19,6 +22,7 @@ WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "+14155238886")
 OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918500701521")
 LEADS_FILE = os.getenv("LEADS_FILE", "whatsapp_leads.xlsx")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
+SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
 
 sessions = {}
 opted_out = set()
@@ -44,6 +48,45 @@ def send(to, body):
         print("Send error:", e)
 
 
+def push_to_sheet(row):
+    """Lead / meeting ని Google Sheets కి పంపుతుంది"""
+    if not SHEET_WEBHOOK_URL:
+        return
+    try:
+        req = urllib.request.Request(
+            SHEET_WEBHOOK_URL,
+            data=json.dumps(row, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        print("Sheet error:", e)
+
+
+def normalize_phone(num):
+    digits = re.sub(r"\D", "", num)
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    if len(digits) == 10:
+        return "+91" + digits
+    return None
+
+
+def handle_owner_reply(owner_phone, text):
+    parts = text.split(None, 2)
+    if len(parts) < 3:
+        send(owner_phone, "ఫార్మాట్: REPLY <నంబర్> <మెసేజ్>\nఉదా: REPLY 8074915644 రేపు 10కి ఇల్లు చూపిస్తాను 🏠")
+        return
+    target = normalize_phone(parts[1])
+    msg = parts[2].strip()
+    if not target:
+        send(owner_phone, "సరైన నంబర్ ఇవ్వండి 🙏\nఉదా: REPLY 8074915644 మీ మెసేజ్")
+        return
+    send(target, msg)
+    send(owner_phone, f"✅ మీ మెసేజ్ పంపబడింది → {target}")
+
+
 @app.get("/")
 def health():
     return {"status": "ok"}
@@ -57,6 +100,11 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
     if phone in opted_out or text.lower() in ("stop", "unsubscribe"):
         opted_out.add(phone)
         send(phone, "మీరు ఇకపై మా నుంచి messages పొందరు. ధన్యవాదాలు. 🙏")
+        return Response(str(MessagingResponse()), media_type="text/xml")
+
+    # ===== Owner customized reply command =====
+    if phone == OWNER_WHATSAPP and text.lower().startswith("reply"):
+        handle_owner_reply(phone, text)
         return Response(str(MessagingResponse()), media_type="text/xml")
 
     s = sessions.get(phone)
@@ -193,6 +241,7 @@ def save_lead(d):
         "move_in": d.get("move_in", ""),
         "source": "whatsapp"
     }
+    push_to_sheet(row)  # ===== Google Sheets కి పంపుతుంది =====
     try:
         if os.path.exists(LEADS_FILE):
             df = pd.read_excel(LEADS_FILE)
@@ -212,6 +261,7 @@ def save_meeting(phone, d):
         "meeting_time": d.get("meeting_time", ""),
         "type": "meeting"
     }
+    push_to_sheet(row)  # ===== Google Sheets కి పంపుతుంది =====
     try:
         if os.path.exists(LEADS_FILE):
             df = pd.read_excel(LEADS_FILE)
