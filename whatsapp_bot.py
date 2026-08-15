@@ -23,10 +23,9 @@ OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918500701521")
 LEADS_FILE = os.getenv("LEADS_FILE", "whatsapp_leads.xlsx")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
-
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
-WA_CATALOG_LINK = os.getenv("WA_CATALOG_LINK", "https://wa.me/c/918500701521")
+CATALOGUE_LINK = os.getenv("CATALOGUE_LINK", "https://wa.me/c/918500701521")
 
 sessions = {}
 opted_out = set()
@@ -54,7 +53,6 @@ def send(to, body):
 
 
 def push_to_sheet(row):
-    """Lead / meeting ని Google Sheets కి పంపుతుంది"""
     if not SHEET_WEBHOOK_URL:
         return
     try:
@@ -107,7 +105,6 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
         send(phone, "మీరు ఇకపై మా నుంచి messages పొందరు. ధన్యవాదాలు. 🙏")
         return Response(str(MessagingResponse()), media_type="text/xml")
 
-    # ===== Owner customized reply command =====
     if phone == OWNER_WHATSAPP and text.lower().startswith("reply"):
         handle_owner_reply(phone, text)
         return Response(str(MessagingResponse()), media_type="text/xml")
@@ -160,7 +157,7 @@ def route(phone, s, text):
                 "🔗 మా పేజీలు చూడండి:\n\n"
                 f"🛒 OLX Ads:\n{OLX_LINK}\n\n"
                 f"🎬 YouTube Shorts (ఇళ్ల వీడియోలు):\n{YOUTUBE_LINK}\n\n"
-                f"🛍️ WhatsApp Catalogue:\n{WA_CATALOG_LINK}"
+                f"🛍️ WhatsApp Catalogue:\n{CATALOGUE_LINK}"
             )
         else:
             send(phone, MENU)
@@ -239,8 +236,7 @@ def done_text(d):
         "మీ వివరాలు నమోదయ్యాయి. ✅\n"
         "మీ బడ్జెట్‌కు సరిపడే ఇల్లు దొరికిన వెంటనే మీకు తెలియజేస్తాము. 🏡\n\n"
         "📍 మీటింగ్ పాయింట్: కూకట్‌పల్లి మెట్రో స్టేషన్\n"
-        "📞 8500701521 (కాల్/వాట్సాప్)\n"
-        f"🎬 ఇళ్ల వీడియోలు: {YOUTUBE_LINK}"
+        "📞 8500701521 (కాల్/వాట్సాప్)"
     )
 
 
@@ -319,22 +315,20 @@ def send_listings(phone, d):
             phone,
             "ప్రస్తుతం లిస్ట్ అందుబాటులో లేదు. 🙏\n"
             "ఆప్షన్ 1 ఎంచుకుని మీ వివరాలు పంపండి, "
-            "సరిపడే ఇల్లు దొరికిన వెంటనే తెలియజేస్తాము.\n"
-            f"🎬 వీడియోలు: {YOUTUBE_LINK}"
+            "లేదా 5 నొక్కి OLX లో చూడండి."
         )
         return
 
-    top = df.head(3)
+    top = df.head(5)
     if top.empty:
         send(phone, "ప్రస్తుతం లిస్టులు లేవు. 😔\nఆప్షన్ 1 తో మీ వివరాలు పంపండి.")
         return
 
-    has_link = "link" in df.columns
     lines = ["🏘️ అందుబాటులో ఉన్న ఇళ్లు:\n"]
     for _, r in top.iterrows():
-        line = f"• {r['title']} | {r['area']} | ₹{r['budget']} | {r['bhk']}"
-        if has_link and pd.notna(r.get("link")) and str(r["link"]).strip():
+        line = f"• {r['title']} | {r['area']} | ₹{r['budget']}"
+        if 'link' in df.columns and str(r.get('link', '')).startswith('http'):
             line += f"\n  🔗 {r['link']}"
         lines.append(line)
-    lines.append("\nనచ్చిందా? మీటింగ్ బుక్ చేయాలంటే 3 టైప్ చేయండి.\nమరిన్ని ఇళ్లు: 5 టైప్ చేయండి 🔗")
+    lines.append("\nనచ్చిందా? మీటింగ్ బుక్ చేయాలంటే 3, మొత్తం లిస్ట్ కోసం 5 టైప్ చేయండి.")
     send(phone, "\n".join(lines))
