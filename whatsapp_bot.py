@@ -41,6 +41,21 @@ MENU = (
 )
 
 
+def push_to_sheet(row):
+    if not SHEET_WEBHOOK_URL:
+        return
+    try:
+        req = urllib.request.Request(
+            SHEET_WEBHOOK_URL,
+            data=json.dumps(row, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        print("Sheet error:", e)
+
+
 def log_chat(direction, phone, body):
     push_to_sheet({
         "sheet": "Chats",
@@ -60,20 +75,6 @@ def send(to, body):
         log_chat("OUT", to, body)
     except Exception as e:
         print("Send error:", e)
-
-def push_to_sheet(row):
-    if not SHEET_WEBHOOK_URL:
-        return
-    try:
-        req = urllib.request.Request(
-            SHEET_WEBHOOK_URL,
-            data=json.dumps(row, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=10)
-    except Exception as e:
-        print("Sheet error:", e)
 
 
 def normalize_phone(num):
@@ -118,7 +119,7 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
         handle_owner_reply(phone, text)
         return Response(str(MessagingResponse()), media_type="text/xml")
 
-       log_chat("IN", phone, text)
+    log_chat("IN", phone, text)
 
     s = sessions.get(phone)
     if s is None:
@@ -205,14 +206,8 @@ def route(phone, s, text):
 
     elif st == "CONFIRM":
         if text.lower() in ("అవును", "yes", "ok", "సరే"):
-            save_lead(    row = {    row = {
-        "sheet": "Leads",
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "phone": phone,
-        "sheet": "Leads",
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "phone": phone,)
-            notify_owner(d)
+            save_lead(phone, d)
+            notify_owner(phone, d)
             s["state"] = "MENU"
             s["data"] = {}
             send(phone, done_text(d))
@@ -223,10 +218,7 @@ def route(phone, s, text):
 
     elif st == "MEETING":
         d["meeting_time"] = text
-        save_meeting(    row = {
-        "sheet": "Leads",
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "phone": phone,)
+        save_meeting(phone, d)
         notify_owner_meeting(phone, d)
         s["state"] = "MENU"
         send(
@@ -260,9 +252,11 @@ def done_text(d):
     )
 
 
-def save_lead(d):
+def save_lead(phone, d):
     row = {
+        "sheet": "Leads",
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "phone": phone,
         "name": d.get("name", ""),
         "stay_type": d.get("stay_type", ""),
         "occupants": d.get("occupants", ""),
@@ -285,6 +279,7 @@ def save_lead(d):
 
 def save_meeting(phone, d):
     row = {
+        "sheet": "Leads",
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "phone": phone,
         "name": d.get("name", ""),
@@ -303,9 +298,10 @@ def save_meeting(phone, d):
         print("Save error:", e)
 
 
-def notify_owner(d):
+def notify_owner(phone, d):
     msg = (
         "🆕 కొత్త WhatsApp లీడ్:\n"
+        f"📞 Phone: {phone}\n"
         f"పేరు: {d.get('name','')}\n"
         f"రకం: {d.get('stay_type','')}\n"
         f"ఆక్యుపెంట్స్: {d.get('occupants','')}\n"
