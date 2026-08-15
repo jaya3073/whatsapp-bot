@@ -23,9 +23,21 @@ OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918500701521")
 LEADS_FILE = os.getenv("LEADS_FILE", "whatsapp_leads.xlsx")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
 CATALOGUE_LINK = os.getenv("CATALOGUE_LINK", "https://wa.me/c/918500701521")
+
+FEES_INFO = (
+    "💵 ఫీజు వివరాలు:\n"
+    "• ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
+    "• ముందస్తు ఫీజు: ఫ్లాట్స్ చూపించే ముందు ₹800 💸 (ఈ మొత్తం కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
+    "• 🌇 ప్రీమియం అపార్ట్‌మెంట్స్ ఎంపికకు ఈ ఫీజు!\n"
+    "• 8k లోపు ఇళ్లకు ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹4,000 మాత్రమే.\n"
+    "సంప్రదించండి: 📞 Shiva 8500701521 | Direct WhatsApp: 8074915644 📱\n"
+    "WhatsApp: https://wa.me/918500701521"
+)
 
 sessions = {}
 opted_out = set()
@@ -33,11 +45,11 @@ opted_out = set()
 MENU = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీకి స్వాగతం. 🏡\n\n"
     "1️⃣ ఇల్లు వెతకడం ప్రారంభించండి\n"
-    "2️⃣ అందుబాటులో ఉన్న ఇళ్లు చూడండి 🏘️\n"
+    "2️⃣ మీ బడ్జెట్‌లో ఇళ్లు చూడండి 🏘️\n"
     "3️⃣ మీటింగ్ బుక్ చేయండి 🚇\n"
     "4️⃣ శివ గారితో మాట్లాడాలి ☎️\n"
     "5️⃣ మా OLX / YouTube / Catalogue పేజీలు 🔗\n\n"
-    "దయచేసి సంఖ్య టైప్ చేయండి (1-5)"
+    "సంఖ్య టైప్ చేయండి (1-5) — లేదా మీ ప్రశ్న నేరుగా రాయండి, నేను సమాధానం చెప్తాను! 😊"
 )
 
 
@@ -84,6 +96,76 @@ def normalize_phone(num):
     if len(digits) == 10:
         return "+91" + digits
     return None
+
+
+def parse_budget(text):
+    t = text.lower().replace(",", "").strip()
+    m = re.search(r"(\d+(?:\.\d+)?)\s*k", t)
+    if m:
+        return int(float(m.group(1)) * 1000)
+    m = re.search(r"\d+", t)
+    if m:
+        v = int(m.group())
+        if v < 1000:
+            v *= 1000
+        return v
+    return None
+
+
+def load_properties():
+    try:
+        return pd.read_excel(PROPERTIES_FILE)
+    except Exception:
+        return None
+
+
+def properties_context():
+    df = load_properties()
+    if df is None or df.empty:
+        return "ప్రస్తుతం ఇళ్ల లిస్ట్ ఖాళీగా ఉంది."
+    lines = []
+    for _, r in df.iterrows():
+        link = str(r.get('link', '')) if 'link' in df.columns else ''
+        lines.append(f"{r['title']} | {r['area']} | ₹{r['budget']} | {link}")
+    return "\n".join(lines)
+
+
+def ask_gemini(user_text):
+    if not GEMINI_API_KEY:
+        return None
+    system = (
+        "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp assistant వు. "
+        "Telugu, English, Tanglish — ఏ భాషలో అడిగినా అదే భాషలో సమాధానం ఇవ్వు.\n"
+        "నియమాలు:\n"
+        "- ఇళ్ల గురించి అడిగితే, కింద ఇచ్చిన లిస్ట్ నుంచి మాత్రమే చెప్పు. ఊహించి చెప్పవద్దు.\n"
+        "- Budget చెబితే ఆ budget లోపు ఉన్న ఇళ్లు గరిష్టం 3 చూపించు, ప్రతి దానికి 🔗 link ఇవ్వు.\n"
+        "- Area చెబితే ఆ area ఇళ్లు చూపించు.\n"
+        "- Photos/videos అడిగితే ఆ ఇంటి link లో చూడమని చెప్పు.\n"
+        "- మీటింగ్ బుక్ చేయాలంటే '3' టైప్ చేయమని, శివ గారితో మాట్లాడాలంటే 8500701521 కి కాల్ చేయమని చెప్పు.\n"
+        "- సమాధానాలు చిన్నగా, స్నేహపూర్వకంగా ఉండాలి. Emojis వాడవచ్చు.\n"
+        "- ఇళ్లకు సంబంధం లేని ప్రశ్నలకు, మళ్లీ ఇళ్ల గురించే మాట్లాడేలా మళ్లించు.\n"
+        "- ఫీజు/కమిషన్/advance గురించి అడిగితే, కింద ఇచ్చిన ఫీజు వివరాలనే ఖచ్చితంగా చెప్పు.\n\n"
+        "ఇళ్ల లిస్ట్ (title | area | budget | link):\n" + properties_context() +
+        "\n\n" + FEES_INFO
+    )
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "systemInstruction": {"parts": [{"text": system}]},
+        "contents": [{"parts": [{"text": user_text}]}],
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=25) as res:
+            data = json.loads(res.read().decode("utf-8"))
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        print("Gemini error:", e)
+        return None
 
 
 def handle_owner_reply(owner_phone, text):
@@ -147,7 +229,8 @@ def route(phone, s, text):
             s["data"] = {}
             send(phone, "మీ పేరు ఏమిటి? 🙋")
         elif text == "2":
-            send_listings(phone, d)
+            s["state"] = "LIST_BUDGET"
+            send(phone, "మీ బడ్జెట్ ఎంత? టైప్ చేయండి 💰\n(ఉదా: 8000 లేదా 8k)")
         elif text == "3":
             s["state"] = "MEETING"
             send(
@@ -172,7 +255,19 @@ def route(phone, s, text):
                 f"🛍️ WhatsApp Catalogue:\n{CATALOGUE_LINK}"
             )
         else:
-            send(phone, MENU)
+            reply = ask_gemini(text)
+            if reply:
+                send(phone, reply)
+            else:
+                send(phone, MENU)
+
+    elif st == "LIST_BUDGET":
+        b = parse_budget(text)
+        if not b:
+            send(phone, "సరైన బడ్జెట్ టైప్ చేయండి 💰\n(ఉదా: 8000 లేదా 8k)")
+            return
+        s["state"] = "MENU"
+        send_matched_listings(phone, b)
 
     elif st == "NAME":
         d["name"] = text
@@ -211,6 +306,9 @@ def route(phone, s, text):
             s["state"] = "MENU"
             s["data"] = {}
             send(phone, done_text(d))
+            b = parse_budget(d.get("budget", ""))
+            if b:
+                send_matched_listings(phone, b)
         else:
             s["state"] = "NAME"
             s["data"] = {}
@@ -246,10 +344,36 @@ def done_text(d):
     return (
         f"ధన్యవాదాలు {d.get('name','')}! 🙏\n"
         "మీ వివరాలు నమోదయ్యాయి. ✅\n"
-        "మీ బడ్జెట్‌కు సరిపడే ఇల్లు దొరికిన వెంటనే మీకు తెలియజేస్తాము. 🏡\n\n"
+        "మీ బడ్జెట్‌కు సరిపడే ఇళ్లు కింద పంపుతున్నాను. 🏡\n\n"
         "📍 మీటింగ్ పాయింట్: కూకట్‌పల్లి మెట్రో స్టేషన్\n"
         "📞 8500701521 (కాల్/వాట్సాప్)"
     )
+
+
+def send_matched_listings(phone, budget):
+    df = load_properties()
+    if df is None:
+        send(phone, "లిస్ట్ అందుబాటులో లేదు 🙏\nఆప్షన్ 1 తో మీ వివరాలు పంపండి.")
+        return
+
+    df["budget_num"] = pd.to_numeric(df["budget"], errors="coerce")
+    matches = df[df["budget_num"] <= budget].sort_values("budget_num", ascending=False)
+
+    if matches.empty:
+        send(phone, f"₹{budget} లోపు ఇళ్లు లేవు 😔\nదగ్గరలో ఉన్నవి చూడండి:")
+        matches = df.sort_values("budget_num").head(3)
+    else:
+        send(phone, f"✅ మీ బడ్జెట్ ₹{budget} లోపు ఉన్న ఇళ్లు:")
+        matches = matches.head(3)
+
+    lines = []
+    for _, r in matches.iterrows():
+        line = f"• {r['title']} | {r['area']} | ₹{int(r['budget_num'])}"
+        if 'link' in df.columns and str(r.get('link', '')).startswith('http'):
+            line += f"\n  🔗 {r['link']}"
+        lines.append(line)
+    lines.append("\nనచ్చిందా? మీటింగ్ బుక్ చేయాలంటే 3 టైప్ చేయండి.")
+    send(phone, "\n".join(lines))
 
 
 def save_lead(phone, d):
@@ -321,30 +445,3 @@ def notify_owner_meeting(phone, d):
         "📍 కూకట్‌పల్లి మెట్రో స్టేషన్"
     )
     send(OWNER_WHATSAPP, msg)
-
-
-def send_listings(phone, d):
-    try:
-        df = pd.read_excel(PROPERTIES_FILE)
-    except Exception:
-        send(
-            phone,
-            "ప్రస్తుతం లిస్ట్ అందుబాటులో లేదు. 🙏\n"
-            "ఆప్షన్ 1 ఎంచుకుని మీ వివరాలు పంపండి, "
-            "లేదా 5 నొక్కి OLX లో చూడండి."
-        )
-        return
-
-    top = df.head(5)
-    if top.empty:
-        send(phone, "ప్రస్తుతం లిస్టులు లేవు. 😔\nఆప్షన్ 1 తో మీ వివరాలు పంపండి.")
-        return
-
-    lines = ["🏘️ అందుబాటులో ఉన్న ఇళ్లు:\n"]
-    for _, r in top.iterrows():
-        line = f"• {r['title']} | {r['area']} | ₹{r['budget']}"
-        if 'link' in df.columns and str(r.get('link', '')).startswith('http'):
-            line += f"\n  🔗 {r['link']}"
-        lines.append(line)
-    lines.append("\nనచ్చిందా? మీటింగ్ బుక్ చేయాలంటే 3, మొత్తం లిస్ట్ కోసం 5 టైప్ చేయండి.")
-    send(phone, "\n".join(lines))
