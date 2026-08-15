@@ -41,6 +41,15 @@ MENU = (
 )
 
 
+def log_chat(direction, phone, body):
+    push_to_sheet({
+        "sheet": "Chats",
+        "direction": direction,
+        "phone": phone,
+        "message": body,
+    })
+
+
 def send(to, body):
     try:
         client.messages.create(
@@ -48,9 +57,9 @@ def send(to, body):
             to=f"whatsapp:{to}",
             body=body
         )
+        log_chat("OUT", to, body)
     except Exception as e:
         print("Send error:", e)
-
 
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
@@ -108,6 +117,8 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
     if phone == OWNER_WHATSAPP and text.lower().startswith("reply"):
         handle_owner_reply(phone, text)
         return Response(str(MessagingResponse()), media_type="text/xml")
+
+       log_chat("IN", phone, text)
 
     s = sessions.get(phone)
     if s is None:
@@ -194,7 +205,13 @@ def route(phone, s, text):
 
     elif st == "CONFIRM":
         if text.lower() in ("అవును", "yes", "ok", "సరే"):
-            save_lead(d)
+            save_lead(    row = {    row = {
+        "sheet": "Leads",
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "phone": phone,
+        "sheet": "Leads",
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "phone": phone,)
             notify_owner(d)
             s["state"] = "MENU"
             s["data"] = {}
@@ -206,7 +223,10 @@ def route(phone, s, text):
 
     elif st == "MEETING":
         d["meeting_time"] = text
-        save_meeting(phone, d)
+        save_meeting(    row = {
+        "sheet": "Leads",
+        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "phone": phone,)
         notify_owner_meeting(phone, d)
         s["state"] = "MENU"
         send(
