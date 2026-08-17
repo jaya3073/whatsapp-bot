@@ -27,6 +27,7 @@ YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentala
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
 
 opted_out = set()
+sessions = {}
 
 FALLBACK = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
@@ -121,19 +122,20 @@ def properties_context():
 def build_system():
     return (
         "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
-        "Telugu, English, Tanglish — client ఏ భాషలో రాస్తే అదే భాషలో సమాధానం ఇవ్వు.\n\n"
-        "సంభాషణ విధానం (మర్యాదగా, చిన్న వాక్యాలతో):\n"
-        "1. మొదట అడుగు: ఎంత మంది ఉంటారు? ఫ్యామిలీనా లేదా బ్యాచిలర్స్? ఎంత rent budget లో చూస్తున్నారు?\n"
-        "2. client సమాధానం ఇచ్చాక ఫీజు వివరాలు చెప్పు:\n"
+        "Telugu, English, Tanglish — client ఏ భాషలో రాస్తే అదే భాషలో సమాధానం ఇవ్వు.\n"
+        "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n\n"
+        "సంభాషణ దశలు:\n"
+        "1. మొదట అడుగు: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
+        "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
+        "3. ఆ తర్వాత ఫీజు వివరాలు చెప్పు:\n"
         "   • ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
         "   • ₹8,000 లోపు అద్దె ఇళ్లకు: కమిషన్ ₹4,000 మాత్రమే.\n"
-        "   • ఇళ్లు చూపించే ముందు ₹800 visiting fee 💸 (ఈ మొత్తం కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
-        "3. ఫీజు OK అంటే → client budget లోపు ఉన్న ఇళ్ల నుంచి గరిష్టం 3 ఎంచుకుని 🔗 links తో photos పంపు (కింద లిస్ట్ నుంచే).\n"
-        "4. తర్వాత చెప్పు: మిగిలిన ఇళ్లు (మొత్తం 30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
-        "5. YouTube videos కూడా చూడమని చెప్పు — కానీ హెచ్చరిక: అందులో కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా: మరిన్ని వివరాలకు శివ గారికి కాల్ చేయండి 📞 8500701521; Direct WhatsApp 📱 8074915644.\n\n"
+        "   • ఇళ్లు చూపించే ముందు ₹800 visiting fee 💸 (కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
+        "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
+        "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
+        "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521; Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
-        "- ఇళ్ల సిఫార్సులు కింద లిస్ట్ నుంచే; ఊహించి చెప్పవద్దు.\n"
+        "- ఇళ్ల సిఫార్సులు కింద లిస్ట్ నుంచే; internet/ఊహల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- లిస్ట్ లో లేనిది అడిగితే OLX profile చూడమని చెప్పు.\n"
         "- ఇతర విషయాలు అడిగితే మళ్లీ ఇళ్ల వైపు మళ్లించు.\n"
         "- సమాధానాలు చిన్నగా, స్నేహపూర్వకంగా, emojis తో.\n\n"
@@ -141,13 +143,24 @@ def build_system():
     )
 
 
-def ask_gemini(user_text):
+def ask_gemini(phone, user_text):
     if not GEMINI_API_KEY:
         return None
+
+    hist = sessions.get(phone, [])
+    hist.append({"role": "user", "text": user_text})
+    hist = hist[-12:]
+    sessions[phone] = hist
+
+    contents = []
+    for m in hist:
+        contents.append({"role": m["role"], "parts": [{"text": m["text"]}]})
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     payload = {
         "systemInstruction": {"parts": [{"text": build_system()}]},
-        "contents": [{"parts": [{"text": user_text}]}],
+        "contents": contents,
+        "tools": [{"google_search": {}}],
     }
     try:
         req = urllib.request.Request(
@@ -156,9 +169,12 @@ def ask_gemini(user_text):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=25) as res:
+        with urllib.request.urlopen(req, timeout=30) as res:
             data = json.loads(res.read().decode("utf-8"))
-        return data["candidates"][0]["content"]["parts"][0]["text"]
+        reply = data["candidates"][0]["content"]["parts"][0]["text"]
+        hist.append({"role": "model", "text": reply})
+        sessions[phone] = hist[-12:]
+        return reply
     except Exception as e:
         print("Gemini error:", e)
         return None
@@ -185,7 +201,7 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
 
     log_chat("IN", phone, text)
 
-    reply = ask_gemini(text)
+    reply = ask_gemini(phone, text)
     send(phone, reply if reply else FALLBACK)
 
     return Response(str(MessagingResponse()), media_type="text/xml")
