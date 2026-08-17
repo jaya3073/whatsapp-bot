@@ -32,10 +32,11 @@ sessions = {}
 FALLBACK = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
     "దయచేసి మీ వివరాలు రాయండి:\n"
+    "• మీ పేరు?\n"
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget లో చూస్తున్నారు?\n\n"
-    "📞 శివ గారు: 8500701521\n"
+    "📞 శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
     "📱 Direct WhatsApp: 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
     f"🎬 YouTube: {YOUTUBE_LINK}"
@@ -125,7 +126,7 @@ def build_system():
         "Telugu, English, Tanglish — client ఏ భాషలో రాస్తే అదే భాషలో సమాధానం ఇవ్వు.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n\n"
         "సంభాషణ దశలు:\n"
-        "1. మొదట అడుగు: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
+        "1. మొదట client **పేరు** అడుగు. తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
         "3. ఆ తర్వాత ఫీజు వివరాలు చెప్పు:\n"
         "   • ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
@@ -133,7 +134,7 @@ def build_system():
         "   • ఇళ్లు చూపించే ముందు ₹800 visiting fee 💸 (కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521; Direct WhatsApp 📱 8074915644.\n\n"
+        "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
         "- ఇళ్ల సిఫార్సులు కింద లిస్ట్ నుంచే; internet/ఊహల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- లిస్ట్ లో లేనిది అడిగితే OLX profile చూడమని చెప్పు.\n"
@@ -141,6 +142,19 @@ def build_system():
         "- సమాధానాలు చిన్నగా, స్నేహపూర్వకంగా, emojis తో.\n\n"
         "ఇళ్ల లిస్ట్ (title | area | budget | link):\n" + properties_context()
     )
+
+
+def _call_gemini(payload):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as res:
+        data = json.loads(res.read().decode("utf-8"))
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 def ask_gemini(phone, user_text):
@@ -152,32 +166,30 @@ def ask_gemini(phone, user_text):
     hist = hist[-12:]
     sessions[phone] = hist
 
-    contents = []
-    for m in hist:
-        contents.append({"role": m["role"], "parts": [{"text": m["text"]}]})
+    contents = [{"role": m["role"], "parts": [{"text": m["text"]}}] for m in hist]
+    system = {"parts": [{"text": build_system()}]}
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "systemInstruction": {"parts": [{"text": build_system()}]},
-        "contents": contents,
-        "tools": [{"google_search": {}}],
-    }
+    reply = None
     try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=30) as res:
-            data = json.loads(res.read().decode("utf-8"))
-        reply = data["candidates"][0]["content"]["parts"][0]["text"]
+        reply = _call_gemini({
+            "systemInstruction": system,
+            "contents": contents,
+            "tools": [{"google_search": {}}],
+        })
+    except Exception as e:
+        print("Gemini tools error:", e)
+        try:
+            reply = _call_gemini({
+                "systemInstruction": system,
+                "contents": contents,
+            })
+        except Exception as e2:
+            print("Gemini error:", e2)
+
+    if reply:
         hist.append({"role": "model", "text": reply})
         sessions[phone] = hist[-12:]
-        return reply
-    except Exception as e:
-        print("Gemini error:", e)
-        return None
+    return reply
 
 
 @app.get("/")
