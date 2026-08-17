@@ -166,7 +166,7 @@ def ask_gemini(phone, user_text):
     hist = hist[-12:]
     sessions[phone] = hist
 
-    contents = [{"role": m["role"], "parts": [{"text": m["text"]}}] for m in hist]
+    contents = [{"role": m["role"], "parts": [{"text": m["text"]}]} for m in hist]
     system = {"parts": [{"text": build_system()}]}
 
     reply = None
