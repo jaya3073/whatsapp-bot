@@ -102,7 +102,17 @@ def handle_owner_reply(owner_phone, text):
     send(owner_phone, f"✅ మీ మెసేజ్ పంపబడింది → {target}")
 
 
-def load_properties():
+def load_properties():def youtube_context():
+    try:
+        df = pd.read_excel("youtube.xlsx")
+    except Exception:
+        return ""
+    if df is None or df.empty:
+        return ""
+    lines = []
+    for _, r in df.iterrows():
+        lines.append(f"{r['title']} | {r['link']}")
+    return "\n".join(lines)
     try:
         return pd.read_excel(PROPERTIES_FILE)
     except Exception:
@@ -140,7 +150,8 @@ def build_system():
         "- లిస్ట్ లో లేనిది అడిగితే OLX profile చూడమని చెప్పు.\n"
         "- ఇతర విషయాలు అడిగితే మళ్లీ ఇళ్ల వైపు మళ్లించు.\n"
         "- సమాధానాలు చిన్నగా, స్నేహపూర్వకంగా, emojis తో.\n\n"
-        "ఇళ్ల లిస్ట్ (title | area | budget | link):\n" + properties_context()
+                "ఇళ్ల లిస్ట్ (title | area | budget | link):\n" + properties_context() +
+        "\n\nమా YouTube videos (title | link):\n" + (youtube_context() or "ఇంకా videos లిస్ట్ చేయలేదు.")
     )
 
 
