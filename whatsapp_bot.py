@@ -21,7 +21,7 @@ WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "+14155238886")
 OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918500701521")
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
@@ -31,11 +31,11 @@ sessions = {}
 
 FALLBACK = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
-    "దయచేసి మీ వివరాలు రాయండి:\n"
-    "• మీ పేరు?\n"
+    "మీ పేరు & వివరాలు రాయండి:\n"
+    "• పేరు?\n"
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
-    "• ఎంత rent budget లో చూస్తున్నారు?\n\n"
+    "• ఎంత rent budget?\n\n"
     "📞 శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
     "📱 Direct WhatsApp: 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
@@ -102,17 +102,7 @@ def handle_owner_reply(owner_phone, text):
     send(owner_phone, f"✅ మీ మెసేజ్ పంపబడింది → {target}")
 
 
-def load_properties():def youtube_context():
-    try:
-        df = pd.read_excel("youtube.xlsx")
-    except Exception:
-        return ""
-    if df is None or df.empty:
-        return ""
-    lines = []
-    for _, r in df.iterrows():
-        lines.append(f"{r['title']} | {r['link']}")
-    return "\n".join(lines)
+def load_properties():
     try:
         return pd.read_excel(PROPERTIES_FILE)
     except Exception:
@@ -130,13 +120,26 @@ def properties_context():
     return "\n".join(lines)
 
 
+def youtube_context():
+    try:
+        df = pd.read_excel("youtube.xlsx")
+    except Exception:
+        return ""
+    if df is None or df.empty:
+        return ""
+    lines = []
+    for _, r in df.iterrows():
+        lines.append(f"{r['title']} | {r['link']}")
+    return "\n".join(lines)
+
+
 def build_system():
     return (
         "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
         "Telugu, English, Tanglish — client ఏ భాషలో రాస్తే అదే భాషలో సమాధానం ఇవ్వు.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n\n"
         "సంభాషణ దశలు:\n"
-        "1. మొదట client **పేరు** అడుగు. తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
+        "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
         "3. ఆ తర్వాత ఫీజు వివరాలు చెప్పు:\n"
         "   • ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
@@ -146,11 +149,12 @@ def build_system():
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
         "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
-        "- ఇళ్ల సిఫార్సులు కింద లిస్ట్ నుంచే; internet/ఊహల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
+        "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/ఊహల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
+        "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
         "- లిస్ట్ లో లేనిది అడిగితే OLX profile చూడమని చెప్పు.\n"
         "- ఇతర విషయాలు అడిగితే మళ్లీ ఇళ్ల వైపు మళ్లించు.\n"
         "- సమాధానాలు చిన్నగా, స్నేహపూర్వకంగా, emojis తో.\n\n"
-                "ఇళ్ల లిస్ట్ (title | area | budget | link):\n" + properties_context() +
+        "ఇళ్ల లిస్ట్ (title | area | budget | link):\n" + properties_context() +
         "\n\nమా YouTube videos (title | link):\n" + (youtube_context() or "ఇంకా videos లిస్ట్ చేయలేదు.")
     )
 
@@ -190,10 +194,7 @@ def ask_gemini(phone, user_text):
     except Exception as e:
         print("Gemini tools error:", e)
         try:
-            reply = _call_gemini({
-                "systemInstruction": system,
-                "contents": contents,
-            })
+            reply = _call_gemini({"systemInstruction": system, "contents": contents})
         except Exception as e2:
             print("Gemini error:", e2)
 
