@@ -1,6 +1,8 @@
 import os
 import re
+import io
 import json
+import time
 import urllib.request
 import pandas as pd
 from fastapi import FastAPI, Form, Response
@@ -20,14 +22,18 @@ client = Client(
 WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "+14155238886")
 OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918500701521")
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
+SHEET_WRITE_URL = os.getenv("SHEET_WRITE_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
+PROPERTIES_SHEET_URL = os.getenv("PROPERTIES_SHEET_URL", "")
+YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 
 opted_out = set()
 sessions = {}
+_cache = {}
 
 FALLBACK = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
@@ -88,6 +94,49 @@ def normalize_phone(num):
     return None
 
 
+def sheet_id_from_url(url):
+    m = re.search(r"/d/([a-zA-Z0-9_-]+)", url or "")
+    return m.group(1) if m else None
+
+
+def append_row(sheet_url, cache_key, row):
+    sid = sheet_id_from_url(sheet_url)
+    if not sid or not SHEET_WRITE_URL:
+        return False
+    try:
+        req = urllib.request.Request(
+            SHEET_WRITE_URL,
+            data=json.dumps({"id": sid, "row": row}, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=15)
+        _cache.pop(cache_key, None)
+        return True
+    except Exception as e:
+        print("Write error:", e)
+        return False
+
+
+def handle_owner_command(phone, text):
+    parts = [p.strip() for p in text.split("|")]
+    if text.lower().startswith("addolx"):
+        if len(parts) >= 5:
+            ok = append_row(PROPERTIES_SHEET_URL, "props", [parts[1], parts[2], parts[3], parts[4]])
+            send(phone, "✅ కొత్త OLX ad add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else "❌ Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
+        else:
+            send(phone, "ఫార్మాట్: ADDOLX | title | area | budget | link")
+        return True
+    if text.lower().startswith("addyt"):
+        if len(parts) >= 3:
+            ok = append_row(YOUTUBE_SHEET_URL, "yt", [parts[1], parts[2]])
+            send(phone, "✅ కొత్త YouTube video add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else "❌ Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
+        else:
+            send(phone, "ఫార్మాట్: ADDYT | title | link")
+        return True
+    return False
+
+
 def handle_owner_reply(owner_phone, text):
     parts = text.split(None, 2)
     if len(parts) < 3:
@@ -102,7 +151,28 @@ def handle_owner_reply(owner_phone, text):
     send(owner_phone, f"✅ మీ మెసేజ్ పంపబడింది → {target}")
 
 
+def fetch_df(key, url, max_age=120):
+    now = time.time()
+    if key in _cache and now - _cache[key][0] < max_age:
+        return _cache[key][1]
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=15) as res:
+            df = pd.read_csv(io.StringIO(res.read().decode("utf-8")))
+        _cache[key] = (now, df)
+        return df
+    except Exception as e:
+        print("CSV fetch error:", e)
+        if key in _cache:
+            return _cache[key][1]
+        return None
+
+
 def load_properties():
+    if PROPERTIES_SHEET_URL:
+        df = fetch_df("props", PROPERTIES_SHEET_URL)
+        if df is not None and not df.empty:
+            return df
     try:
         return pd.read_excel(PROPERTIES_FILE)
     except Exception:
@@ -121,10 +191,14 @@ def properties_context():
 
 
 def youtube_context():
-    try:
-        df = pd.read_excel("youtube.xlsx")
-    except Exception:
-        return ""
+    df = None
+    if YOUTUBE_SHEET_URL:
+        df = fetch_df("yt", YOUTUBE_SHEET_URL)
+    if df is None or df.empty:
+        try:
+            df = pd.read_excel("youtube.xlsx")
+        except Exception:
+            return ""
     if df is None or df.empty:
         return ""
     lines = []
@@ -219,9 +293,15 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
         send(phone, "మీరు ఇకపై మా నుంచి messages పొందరు. ధన్యవాదాలు. 🙏")
         return Response(str(MessagingResponse()), media_type="text/xml")
 
-    if phone == OWNER_WHATSAPP and text.lower().startswith("reply"):
-        handle_owner_reply(phone, text)
-        return Response(str(MessagingResponse()), media_type="text/xml")
+    if phone == OWNER_WHATSAPP:
+        if text.lower().startswith(("addolx", "addyt")):
+            log_chat("IN", phone, text)
+            handle_owner_command(phone, text)
+            return Response(str(MessagingResponse()), media_type="text/xml")
+        if text.lower().startswith("reply"):
+            log_chat("IN", phone, text)
+            handle_owner_reply(phone, text)
+            return Response(str(MessagingResponse()), media_type="text/xml")
 
     log_chat("IN", phone, text)
 
