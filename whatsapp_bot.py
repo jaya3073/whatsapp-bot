@@ -92,7 +92,8 @@ def send(to, body, media_url=None):
         if media_url:
             kwargs["media_url"] = [media_url]
         client.messages.create(**kwargs)
-        log_chat("OUT", to, body or "(voice reply)")
+        if body:
+            log_chat("OUT", to, body)
     except Exception as e:
         print("Send error:", e)
 
@@ -312,6 +313,11 @@ def parse_json_reply(raw):
         return "", raw
 
 
+def wants_voice(text):
+    low = text.lower()
+    return any(w in low for w in ("voice", "audio", "వాయిస్", "ఆడియో", "మాట్లాడు", "వినిపించు"))
+
+
 def ask_gemini_audio(phone, audio_bytes, mime):
     hist = sessions.get(phone, [])
     instruction = (
@@ -329,8 +335,7 @@ def ask_gemini_audio(phone, audio_bytes, mime):
         "systemInstruction": {"parts": [{"text": build_system()}]},
         "contents": contents,
     })
-    transcript, reply = parse_json_reply(raw)
-    return transcript, reply
+    return parse_json_reply(raw)
 
 
 def ask_gemini(phone, user_text):
@@ -409,20 +414,18 @@ async def whatsapp_webhook(
         n_media = 0
 
     if n_media > 0 and MediaUrl0:
-        log_chat("IN", phone, f"🎤 (voice note) {text}")
-        reply_text = None
-        transcript = ""
+        transcript, reply_text = "", None
         try:
             audio_bytes, mime = download_twilio_media(MediaUrl0)
             transcript, reply_text = ask_gemini_audio(phone, audio_bytes, mime)
         except Exception as e:
             print("Voice note error:", e)
+        log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
         if reply_text:
             hist = sessions.get(phone, [])
-            hist.append({"role": "user", "text": f"(voice) {transcript or text}"})
+            hist.append({"role": "user", "text": f"(voice) {transcript or 'voice note'}"})
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
-            log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
             try:
                 audio_url = tts_wav_url(reply_text)
                 send(phone, None, media_url=audio_url)
@@ -430,6 +433,7 @@ async def whatsapp_webhook(
             except Exception as e:
                 print("TTS error:", e)
                 send(phone, reply_text)
+                log_chat("OUT", phone, reply_text)
         else:
             send(phone, FALLBACK)
         return Response(str(MessagingResponse()), media_type="text/xml")
@@ -437,6 +441,15 @@ async def whatsapp_webhook(
     log_chat("IN", phone, text)
 
     reply = ask_gemini(phone, text)
-    send(phone, reply if reply else FALLBACK)
+    final = reply if reply else FALLBACK
+    send(phone, final)
+
+    if reply and wants_voice(text):
+        try:
+            audio_url = tts_wav_url(reply)
+            send(phone, None, media_url=audio_url)
+            log_chat("OUT", phone, f"🔊 {reply}")
+        except Exception as e:
+            print("TTS error:", e)
 
     return Response(str(MessagingResponse()), media_type="text/xml")
