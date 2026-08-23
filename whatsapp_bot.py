@@ -28,8 +28,8 @@ SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
 SHEET_WRITE_URL = os.getenv("SHEET_WRITE_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
-TTS_MODEL = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
 TTS_VOICE = os.getenv("TTS_VOICE", "Leda")
+TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-2.0-flash-preview-tts"]
 BASE_URL = os.getenv("BASE_URL", "https://whatsapp-bot-esy5.onrender.com")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
@@ -232,10 +232,10 @@ def build_system():
         "3. ఆ తర్వాత ఫీజు వివరాలు చెప్పు:\n"
         "   • ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
         "   • ₹8,000 లోపు అద్దె ఇళ్లకు: కమిషన్ ₹4,000 మాత్రమే.\n"
-        "   • ఇళ్లు చూపించే ముందు ₹800 visiting fee 💸 (కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
         "   • 3 లేదా అంతకంటే ఎక్కువ పెద్దవాళ్లు ఉంటే → కమిషన్ ₹5,000.\n"
         "   • 2BHK అడిగితే → కమిషన్ ₹6,000.\n"
-        "   • మా service: మీ బడ్జెట్ లో 3 లేదా 5 ఇళ్లు చూపిస్తాము. ఒకవేళ ఆ రోజు ఏ ఇల్లు set కాకపోతే, ఇల్లు దొరికేవరకు 1 month validity ఉంటుంది ఆ ₹800 కి.\n"
+        "   • ఇళ్లు చూపించే ముందు ₹800 visiting fee 💸 (కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
+        "   • మా సర్వీస్: మీ బడ్జెట్ లో 3 లేదా 5 ఇళ్లు చూపిస్తాము. ఆ రోజు ఇల్లు set కాకపోతే, ఇల్లు దొరికేవరకు 1 month validity ఉంటుంది ఆ ₹800 కి.\n"
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
         "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
@@ -278,29 +278,38 @@ def pcm_to_wav(pcm, rate=24000):
 
 
 def tts_wav_url(text):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{TTS_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    payload = {
-        "contents": [{"parts": [{"text": text}]}],
-        "generationConfig": {
-            "responseModalities": ["AUDIO"],
-            "speechConfig": {
-                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": TTS_VOICE}}
-            },
-        },
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as res:
-        data = json.loads(res.read().decode("utf-8"))
-    pcm = base64.b64decode(data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
-    wav = pcm_to_wav(pcm)
-    uid = uuid.uuid4().hex
-    audio_store[uid] = wav
-    return f"{BASE_URL}/audio/{uid}"
+    if len(text) > 900:
+        text = text[:900]
+    last_err = None
+    for model in TTS_MODELS:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
+            payload = {
+                "contents": [{"parts": [{"text": text}]}],
+                "generationConfig": {
+                    "responseModalities": ["AUDIO"],
+                    "speechConfig": {
+                        "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": TTS_VOICE}}
+                    },
+                },
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=120) as res:
+                data = json.loads(res.read().decode("utf-8"))
+            pcm = base64.b64decode(data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
+            wav = pcm_to_wav(pcm)
+            uid = uuid.uuid4().hex
+            audio_store[uid] = wav
+            return f"{BASE_URL}/audio/{uid}"
+        except Exception as e:
+            last_err = e
+            print("TTS model fail:", model, e)
+    raise last_err
 
 
 def parse_json_reply(raw):
@@ -318,8 +327,7 @@ def parse_json_reply(raw):
 
 def wants_voice(text):
     low = text.lower()
-    # Telugu + English keywords for voice request
-    return any(w in low for w in ("voice", "audio", "వాయిస్", "ఆడియో", "మాట్లాడు", "వినిపించు", "చెప్పు", "say", "speak", "tell me in voice"))
+    return any(w in low for w in ("voice", "audio", "వాయిస్", "ఆడియో", "మాట్లాడు", "వినిపించు", "చెప్పు", "speak", "say"))
 
 
 def ask_gemini_audio(phone, audio_bytes, mime):
@@ -448,7 +456,6 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    # If client asked for voice reply OR if the reply contains fees info → send voice too
     if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "కమిషన్" in text):
         try:
             audio_url = tts_wav_url(reply)
