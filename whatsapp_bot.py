@@ -7,6 +7,7 @@ import uuid
 import base64
 import struct
 import urllib.request
+from urllib.error import HTTPError
 import pandas as pd
 from fastapi import FastAPI, Form, Response
 from twilio.rest import Client
@@ -29,7 +30,7 @@ SHEET_WRITE_URL = os.getenv("SHEET_WRITE_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 TTS_VOICE = os.getenv("TTS_VOICE", "Leda")
-TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-2.0-flash-preview-tts"]
+TTS_MODELS = ["gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"]
 BASE_URL = os.getenv("BASE_URL", "https://whatsapp-bot-esy5.onrender.com")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
@@ -277,9 +278,20 @@ def pcm_to_wav(pcm, rate=24000):
     return header + pcm
 
 
+def short_for_tts(text, limit=300):
+    t = text.replace("*", "").replace("_", "")
+    if len(t) <= limit:
+        return t
+    cut = t[:limit]
+    for sep in (".", "!", "?", "\n"):
+        idx = cut.rfind(sep)
+        if idx > 100:
+            return cut[:idx + 1]
+    return cut
+
+
 def tts_wav_url(text):
-    if len(text) > 900:
-        text = text[:900]
+    text = short_for_tts(text)
     last_err = None
     for model in TTS_MODELS:
         try:
@@ -306,6 +318,9 @@ def tts_wav_url(text):
             uid = uuid.uuid4().hex
             audio_store[uid] = wav
             return f"{BASE_URL}/audio/{uid}"
+        except HTTPError as he:
+            last_err = he
+            print("TTS model fail:", model, he.code, he.read().decode()[:300])
         except Exception as e:
             last_err = e
             print("TTS model fail:", model, e)
