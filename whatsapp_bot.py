@@ -233,6 +233,9 @@ def build_system():
         "   • ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
         "   • ₹8,000 లోపు అద్దె ఇళ్లకు: కమిషన్ ₹4,000 మాత్రమే.\n"
         "   • ఇళ్లు చూపించే ముందు ₹800 visiting fee 💸 (కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
+        "   • 3 లేదా అంతకంటే ఎక్కువ పెద్దవాళ్లు ఉంటే → కమిషన్ ₹5,000.\n"
+        "   • 2BHK అడిగితే → కమిషన్ ₹6,000.\n"
+        "   • మా service: మీ బడ్జెట్ లో 3 లేదా 5 ఇళ్లు చూపిస్తాము. ఒకవేళ ఆ రోజు ఏ ఇల్లు set కాకపోతే, ఇల్లు దొరికేవరకు 1 month validity ఉంటుంది ఆ ₹800 కి.\n"
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
         "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
@@ -315,7 +318,8 @@ def parse_json_reply(raw):
 
 def wants_voice(text):
     low = text.lower()
-    return any(w in low for w in ("voice", "audio", "వాయిస్", "ఆడియో", "మాట్లాడు", "వినిపించు"))
+    # Telugu + English keywords for voice request
+    return any(w in low for w in ("voice", "audio", "వాయిస్", "ఆడియో", "మాట్లాడు", "వినిపించు", "చెప్పు", "say", "speak", "tell me in voice"))
 
 
 def ask_gemini_audio(phone, audio_bytes, mime):
@@ -444,7 +448,8 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    if reply and wants_voice(text):
+    # If client asked for voice reply OR if the reply contains fees info → send voice too
+    if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "కమిషన్" in text):
         try:
             audio_url = tts_wav_url(reply)
             send(phone, None, media_url=audio_url)
