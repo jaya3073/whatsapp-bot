@@ -3,6 +3,9 @@ import re
 import io
 import json
 import time
+import uuid
+import base64
+import struct
 import urllib.request
 import pandas as pd
 from fastapi import FastAPI, Form, Response
@@ -14,17 +17,20 @@ load_dotenv()
 
 app = FastAPI()
 
-client = Client(
-    os.getenv("TWILIO_ACCOUNT_SID"),
-    os.getenv("TWILIO_AUTH_TOKEN")
-)
+TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+
+client = Client(TWILIO_SID, TWILIO_TOKEN)
 
 WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "+14155238886")
-OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918500701521")
+OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918074915644")
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
 SHEET_WRITE_URL = os.getenv("SHEET_WRITE_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
+TTS_MODEL = os.getenv("TTS_MODEL", "gemini-2.5-flash-preview-tts")
+TTS_VOICE = os.getenv("TTS_VOICE", "Leda")
+BASE_URL = os.getenv("BASE_URL", "https://whatsapp-bot-esy5.onrender.com")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
@@ -34,14 +40,16 @@ YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 opted_out = set()
 sessions = {}
 _cache = {}
+audio_store = {}
 
 FALLBACK = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
-    "మీ పేరు & వివరాలు రాయండి:\n"
+    "మీ పేరు & వివరాలు రాయండి (లేదా voice note పంపండి 🎤):\n"
     "• పేరు?\n"
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget?\n\n"
+    "🎤 Voice note పంపినా నేను వింటాను — voice లోనే సమాధానం ఇస్తాను! 🔊\n\n"
     "📞 శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
     "📱 Direct WhatsApp: 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
@@ -73,14 +81,18 @@ def log_chat(direction, phone, body):
     })
 
 
-def send(to, body):
+def send(to, body, media_url=None):
     try:
-        client.messages.create(
-            from_=f"whatsapp:{WHATSAPP_FROM}",
-            to=f"whatsapp:{to}",
-            body=body
-        )
-        log_chat("OUT", to, body)
+        kwargs = {
+            "from_": f"whatsapp:{WHATSAPP_FROM}",
+            "to": f"whatsapp:{to}",
+        }
+        if body:
+            kwargs["body"] = body
+        if media_url:
+            kwargs["media_url"] = [media_url]
+        client.messages.create(**kwargs)
+        log_chat("OUT", to, body or "(voice reply)")
     except Exception as e:
         print("Send error:", e)
 
@@ -211,7 +223,8 @@ def build_system():
     return (
         "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
         "Telugu, English, Tanglish — client ఏ భాషలో రాస్తే అదే భాషలో సమాధానం ఇవ్వు.\n"
-        "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n\n"
+        "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
+        "నీవు voice notes వినగలవు 🎤 మరియు voice లో సమాధానం ఇస్తావు 🔊 — client కి అప్పుడప్పుడు ఈ సౌకర్యం గుర్తు చేయి.\n\n"
         "సంభాషణ దశలు:\n"
         "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
@@ -244,6 +257,80 @@ def _call_gemini(payload):
     with urllib.request.urlopen(req, timeout=30) as res:
         data = json.loads(res.read().decode("utf-8"))
     return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def download_twilio_media(url):
+    auth = base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
+    req = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
+    with urllib.request.urlopen(req, timeout=20) as res:
+        return res.read(), (res.headers.get_content_type() or "audio/mpeg")
+
+
+def pcm_to_wav(pcm, rate=24000):
+    header = b"RIFF" + struct.pack("<I", 36 + len(pcm)) + b"WAVE"
+    header += b"fmt " + struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16)
+    header += b"data" + struct.pack("<I", len(pcm))
+    return header + pcm
+
+
+def tts_wav_url(text):
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{TTS_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": text}]}],
+        "generationConfig": {
+            "responseModalities": ["AUDIO"],
+            "speechConfig": {
+                "voiceConfig": {"prebuiltVoiceConfig": {"voiceName": TTS_VOICE}}
+            },
+        },
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as res:
+        data = json.loads(res.read().decode("utf-8"))
+    pcm = base64.b64decode(data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
+    wav = pcm_to_wav(pcm)
+    uid = uuid.uuid4().hex
+    audio_store[uid] = wav
+    return f"{BASE_URL}/audio/{uid}"
+
+
+def parse_json_reply(raw):
+    try:
+        clean = raw.strip()
+        if clean.startswith("```"):
+            clean = clean.strip("`")
+            if clean.startswith("json"):
+                clean = clean[4:]
+        obj = json.loads(clean)
+        return obj.get("transcript", ""), obj.get("reply", raw)
+    except Exception:
+        return "", raw
+
+
+def ask_gemini_audio(phone, audio_bytes, mime):
+    hist = sessions.get(phone, [])
+    instruction = (
+        "ఇది client పంపిన voice note. ముందు దాన్ని transcript చేయి, "
+        "తర్వాత assistant గా సమాధానం ఇవ్వు. JSON మాత్రమే ఇవ్వు: "
+        "{\"transcript\": \"...\", \"reply\": \"...\"}"
+    )
+    parts = [
+        {"text": instruction},
+        {"inlineData": {"mimeType": mime, "data": base64.b64encode(audio_bytes).decode()}},
+    ]
+    contents = [{"role": m["role"], "parts": [{"text": m["text"]}]} for m in hist]
+    contents.append({"role": "user", "parts": parts})
+    raw = _call_gemini({
+        "systemInstruction": {"parts": [{"text": build_system()}]},
+        "contents": contents,
+    })
+    transcript, reply = parse_json_reply(raw)
+    return transcript, reply
 
 
 def ask_gemini(phone, user_text):
@@ -283,8 +370,21 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/audio/{uid}")
+def get_audio(uid: str):
+    data = audio_store.get(uid)
+    if not data:
+        return Response(status_code=404)
+    return Response(content=data, media_type="audio/wav")
+
+
 @app.post("/whatsapp")
-async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
+async def whatsapp_webhook(
+    From: str = Form(...),
+    Body: str = Form(""),
+    NumMedia: str = Form("0"),
+    MediaUrl0: str = Form(""),
+):
     phone = From.replace("whatsapp:", "")
     text = (Body or "").strip()
 
@@ -302,6 +402,37 @@ async def whatsapp_webhook(From: str = Form(...), Body: str = Form(...)):
             log_chat("IN", phone, text)
             handle_owner_reply(phone, text)
             return Response(str(MessagingResponse()), media_type="text/xml")
+
+    try:
+        n_media = int(NumMedia or 0)
+    except Exception:
+        n_media = 0
+
+    if n_media > 0 and MediaUrl0:
+        log_chat("IN", phone, f"🎤 (voice note) {text}")
+        reply_text = None
+        transcript = ""
+        try:
+            audio_bytes, mime = download_twilio_media(MediaUrl0)
+            transcript, reply_text = ask_gemini_audio(phone, audio_bytes, mime)
+        except Exception as e:
+            print("Voice note error:", e)
+        if reply_text:
+            hist = sessions.get(phone, [])
+            hist.append({"role": "user", "text": f"(voice) {transcript or text}"})
+            hist.append({"role": "model", "text": reply_text})
+            sessions[phone] = hist[-12:]
+            log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
+            try:
+                audio_url = tts_wav_url(reply_text)
+                send(phone, None, media_url=audio_url)
+                log_chat("OUT", phone, f"🔊 {reply_text}")
+            except Exception as e:
+                print("TTS error:", e)
+                send(phone, reply_text)
+        else:
+            send(phone, FALLBACK)
+        return Response(str(MessagingResponse()), media_type="text/xml")
 
     log_chat("IN", phone, text)
 
