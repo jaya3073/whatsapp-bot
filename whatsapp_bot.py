@@ -479,7 +479,7 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "కమిషన్" in text):
+    if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "కమిషన్" in text or "voice" in text.lower() or "వాయిస్" in text):
         try:
             audio_url = make_voice_url(reply)
             send(phone, None, media_url=audio_url)
