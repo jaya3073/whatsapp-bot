@@ -51,7 +51,7 @@ FALLBACK = (
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget?\n\n"
-    "📞 శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
+    " శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
     "📱 Direct WhatsApp: 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
     f"🎬 YouTube: {YOUTUBE_LINK}"
@@ -144,7 +144,7 @@ def handle_owner_command(phone, text):
     if text.lower().startswith("addyt"):
         if len(parts) >= 3:
             ok = append_row(YOUTUBE_SHEET_URL, "yt", [parts[1], parts[2]])
-            send(phone, "✅ కొత్త YouTube video add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else "❌ Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
+            send(phone, "✅ కొత్త YouTube video add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else " Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
         else:
             send(phone, "ఫార్మాట్: ADDYT | title | link")
         return True
@@ -159,7 +159,7 @@ def handle_owner_reply(owner_phone, text):
     else:
         parts = text.split(None, 2)
         if len(parts) < 3:
-            send(owner_phone, "ఫార్మాట్: REPLY <నంబర్> <మెసేజ్>\nఉదా: REPLY 8074915644 రేపు 10కి ఇల్లు చూపిస్తాను 🏠")
+            send(owner_phone, "ఫార్మాట్: REPLY <నంబర్> <మెసేజ్>\nఉదా: REPLY 8074915644 రేపు 10కి ఇల్లు చూపిస్తాను ")
             return
         target = normalize_phone(parts[1])
         msg = parts[2].strip()
@@ -231,7 +231,7 @@ def build_system():
         "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
         "Telugu, English, Tanglish — client ఏ భాషలో రాస్తే అదే భాషలో సమాధానం ఇవ్వు.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
-        "నీవు voice notes వినగలవు 🎤 మరియు voice లో సమాధానం ఇస్తావు 🔊 — client కి అప్పుడప్పుడు ఈ సౌకర్యం గుర్తు చేయి.\n\n"
+        "నీవు voice notes వినగలవు  మరియు voice లో సమాధానం ఇస్తావు 🔊 — client కి అప్పుడప్పుడు ఈ సకర్యం గుర్తు చేయి.\n\n"
         "సంభాషణ దశలు:\n"
         "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
@@ -243,7 +243,7 @@ def build_system():
         "   • మా సర్వీస్: మీ బడ్జెట్ లో 3 లేదా 5 ఇళ్లు చూపిస్తాము. ఆ రోజు ఇల్లు set కాకపోతే, ఇల్లు దొరికేవరకు 1 month validity ఉంటుంది ఆ ₹800 కి.\n"
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
+        "6. చివరగా: శివ గారికి కాల్ చేయండి  8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
         "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/ఊహల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
@@ -283,7 +283,7 @@ def pcm_to_wav(pcm, rate=24000):
 
 
 def short_for_tts(text, limit=400):
-    t = re.sub(r"[*_🎤🔊✅❌✂️📱🎬🏡🙏😊👍🏠💰😄🎯🎙️]", "", text)
+    t = re.sub(r"[*_🎤🔊✅✂️📱🏡🙏😊🏠💰😄🎯🎙️]", "", text)
     if len(t) <= limit:
         return t
     cut = t[:limit]
@@ -296,6 +296,8 @@ def short_for_tts(text, limit=400):
 
 def make_voice_url(text):
     text = short_for_tts(text)
+    
+    # Try Gemini TTS first
     for model in TTS_MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
@@ -319,18 +321,22 @@ def make_voice_url(text):
             pcm = base64.b64decode(data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
             uid = uuid.uuid4().hex
             audio_store[uid] = (pcm_to_wav(pcm), "audio/wav")
+            print(f"Gemini TTS success with {model}")
             return f"{BASE_URL}/audio/{uid}"
         except Exception as e:
-            print("Gemini TTS fail:", model, e)
+            print(f"Gemini TTS fail with {model}: {e}")
+            continue
+    
+    # Fallback to gTTS
     try:
         buf = io.BytesIO()
-        # Speed up: lang_code='te', tld='co.in', slow=False
         gTTS(text=text, lang='te', tld='co.in', slow=False).write_to_fp(buf)
         uid = uuid.uuid4().hex
         audio_store[uid] = (buf.getvalue(), "audio/mpeg")
+        print("gTTS fallback success")
         return f"{BASE_URL}/audio/{uid}"
     except Exception as e:
-        print("gTTS fail:", e)
+        print(f"gTTS also failed: {e}")
         raise e
 
 
@@ -430,7 +436,7 @@ async def whatsapp_webhook(
 
     if phone in opted_out or text.lower() in ("stop", "unsubscribe"):
         opted_out.add(phone)
-        send(phone, "మీరు ఇకపై మా నుంచి messages పొందరు. ధన్యవాదాలు. 🙏")
+        send(phone, "మీరు ఇకపై మా నుంచి messages పొందరు. ధన్యవాదాలు. ")
         return Response(str(MessagingResponse()), media_type="text/xml")
 
     if phone == OWNER_WHATSAPP:
@@ -455,7 +461,7 @@ async def whatsapp_webhook(
             transcript, reply_text = ask_gemini_audio(phone, audio_bytes, mime)
         except Exception as e:
             print("Voice note error:", e)
-        log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
+        log_chat("IN", phone, f" {transcript or '(voice note)'}")
         if reply_text:
             hist = sessions.get(phone, [])
             hist.append({"role": "user", "text": f"(voice) {transcript or 'voice note'}"})
@@ -479,12 +485,15 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
+    # Enhanced voice trigger condition
     if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "కమిషన్" in text or "voice" in text.lower() or "వాయిస్" in text):
         try:
             audio_url = make_voice_url(reply)
             send(phone, None, media_url=audio_url)
-            log_chat("OUT", phone, f"🔊 {reply}")
+            log_chat("OUT", phone, f" {reply}")
         except Exception as e:
             print("TTS error:", e)
+            # Even if TTS fails, send text reply
+            send(phone, f"🔊 Voice generation failed, but here's the text:\n{reply}")
 
     return Response(str(MessagingResponse()), media_type="text/xml")
