@@ -66,6 +66,7 @@ FALLBACK = (
 
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
+        print("⚠️ SHEET_WEBHOOK_URL not set!")
         return
     try:
         req = urllib.request.Request(
@@ -74,12 +75,14 @@ def push_to_sheet(row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=10)
+        response = urllib.request.urlopen(req, timeout=10)
+        print(f"✅ Sheet push success: {row.get('sheet')}")
     except Exception as e:
-        print("Sheet error:", e)
+        print(f"❌ Sheet error: {e}")
 
 
 def log_chat(direction, phone, body):
+    """Save chat to Google Sheets"""
     push_to_sheet({
         "sheet": "Chats",
         "direction": direction,
@@ -313,24 +316,36 @@ def short_for_tts(text, limit=400):
 
 
 def detect_lang(text):
+    """Detect language from text content"""
+    # Hindi characters (Devanagari)
     if re.search(r"[\u0900-\u097F]", text):
         return "hi"
+    # Telugu characters
     if re.search(r"[\u0C00-\u0C7F]", text):
         return "te"
+    # English fallback
     return "en"
 
 
 def make_voice_url(text):
     text = short_for_tts(text)
     lang = detect_lang(text)
+    
+    print(f"🔊 Generating voice for: {text[:50]}... (lang: {lang})")
 
+    # Try ElevenLabs first (if API key available)
     if ELEVENLABS_API_KEY:
         try:
             url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
             payload = {
                 "text": text,
                 "model_id": "eleven_multilingual_v2",
-                "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+                "voice_settings": {
+                    "stability": 0.75,
+                    "similarity_boost": 0.75,
+                    "style": 0.0,
+                    "use_speaker_boost": True
+                },
             }
             req = urllib.request.Request(
                 url,
@@ -345,20 +360,22 @@ def make_voice_url(text):
                 data = res.read()
             uid = uuid.uuid4().hex
             audio_store[uid] = (data, "audio/mpeg")
-            print("ElevenLabs TTS success")
+            print("✅ ElevenLabs TTS success")
             return f"{BASE_URL}/audio/{uid}"
+            
         except Exception as e:
-            print("ElevenLabs fail:", e)
-
+            print(f"❌ ElevenLabs failed: {e}")
+    
+    # Fallback to gTTS
     try:
         buf = io.BytesIO()
         gTTS(text=text, lang=lang, slow=False).write_to_fp(buf)
         uid = uuid.uuid4().hex
         audio_store[uid] = (buf.getvalue(), "audio/mpeg")
-        print("gTTS success, lang:", lang)
+        print(f"✅ gTTS success, lang: {lang}")
         return f"{BASE_URL}/audio/{uid}"
     except Exception as e:
-        print("gTTS fail:", e)
+        print(f"❌ gTTS failed: {e}")
         raise e
 
 
@@ -485,12 +502,15 @@ async def whatsapp_webhook(
             transcript, reply_text = ask_gemini_audio(phone, audio_bytes, mime)
         except Exception as e:
             print("Voice note error:", e)
+        
         log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
+        
         if reply_text:
             hist = sessions.get(phone, [])
             hist.append({"role": "user", "text": f"(voice) {transcript or 'voice note'}"})
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
+            
             try:
                 audio_url = make_voice_url(reply_text)
                 send(phone, None, media_url=audio_url)
@@ -509,7 +529,7 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "కమిషన్" in text or "वॉयस" in text):
+    if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "कमिशन" in text or "वॉयस" in text):
         try:
             audio_url = make_voice_url(reply)
             send(phone, None, media_url=audio_url)
