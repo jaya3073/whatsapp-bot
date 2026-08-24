@@ -495,6 +495,7 @@ async def whatsapp_webhook(
     except Exception:
         n_media = 0
 
+    # === VOICE NOTE PROCESSING ===
     if n_media > 0 and MediaUrl0:
         transcript, reply_text = "", None
         try:
@@ -511,25 +512,41 @@ async def whatsapp_webhook(
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
             
+            # ALWAYS send voice reply for voice notes
             try:
                 audio_url = make_voice_url(reply_text)
                 send(phone, None, media_url=audio_url)
                 log_chat("OUT", phone, f"🔊 {reply_text}")
             except Exception as e:
                 print("TTS error:", e)
+                # Fallback to text if voice fails
                 send(phone, reply_text)
                 log_chat("OUT", phone, reply_text)
         else:
             send(phone, FALLBACK)
         return Response(str(MessagingResponse()), media_type="text/xml")
 
+    # === TEXT MESSAGE PROCESSING ===
     log_chat("IN", phone, text)
 
     reply = ask_gemini(phone, text)
     final = reply if reply else FALLBACK
+    
+    # Send text message first
     send(phone, final)
 
-    if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "कमिशन" in text or "वॉयस" in text):
+    # Then send voice reply if requested OR if it's a fees-related query
+    should_send_voice = (
+        wants_voice(text) or 
+        "fees" in text.lower() or 
+        "ఫీజు" in text or 
+        "కమిషన్" in text or 
+        "వాయిస్" in text or
+        "audio" in text.lower() or
+        "voice" in text.lower()
+    )
+    
+    if reply and should_send_voice:
         try:
             audio_url = make_voice_url(reply)
             send(phone, None, media_url=audio_url)
