@@ -6,3 +6,4 @@ pandas
 openpyxl
 gTTS
 python-multipart
+elevenlabs
