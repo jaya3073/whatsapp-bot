@@ -9,6 +9,7 @@ import struct
 import urllib.request
 from urllib.error import HTTPError
 import pandas as pd
+from gtts import gTTS
 from fastapi import FastAPI, Form, Response
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
@@ -30,7 +31,7 @@ SHEET_WRITE_URL = os.getenv("SHEET_WRITE_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 TTS_VOICE = os.getenv("TTS_VOICE", "Leda")
-TTS_MODELS = ["gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"]
+TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-2.5-pro-preview-tts"]
 BASE_URL = os.getenv("BASE_URL", "https://whatsapp-bot-esy5.onrender.com")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
@@ -152,12 +153,17 @@ def handle_owner_command(phone, text):
 
 
 def handle_owner_reply(owner_phone, text):
-    parts = text.split(None, 2)
-    if len(parts) < 3:
-        send(owner_phone, "ఫార్మాట్: REPLY <నంబర్> <మెసేజ్>\nఉదా: REPLY 8074915644 రేపు 10కి ఇల్లు చూపిస్తాను 🏠")
-        return
-    target = normalize_phone(parts[1])
-    msg = parts[2].strip()
+    m = re.match(r"(?is)^reply\s+(?:\+?91)?\s*((?:\d[\s-]?){10})", text)
+    if m:
+        target = "+91" + re.sub(r"\D", "", m.group(1))
+        msg = text[m.end():].strip()
+    else:
+        parts = text.split(None, 2)
+        if len(parts) < 3:
+            send(owner_phone, "ఫార్మాట్: REPLY <నంబర్> <మెసేజ్>\nఉదా: REPLY 8074915644 రేపు 10కి ఇల్లు చూపిస్తాను 🏠")
+            return
+        target = normalize_phone(parts[1])
+        msg = parts[2].strip()
     if not target:
         send(owner_phone, "సరైన నంబర్ ఇవ్వండి 🙏\nఉదా: REPLY 8074915644 మీ మెసేజ్")
         return
@@ -278,8 +284,8 @@ def pcm_to_wav(pcm, rate=24000):
     return header + pcm
 
 
-def short_for_tts(text, limit=300):
-    t = text.replace("*", "").replace("_", "")
+def short_for_tts(text, limit=400):
+    t = re.sub(r"[*_🎤🔊✅❌✂️📱🎬🏡🙏😊👍🏠💰😄🎯🎙️]", "", text)
     if len(t) <= limit:
         return t
     cut = t[:limit]
@@ -290,9 +296,8 @@ def short_for_tts(text, limit=300):
     return cut
 
 
-def tts_wav_url(text):
+def make_voice_url(text):
     text = short_for_tts(text)
-    last_err = None
     for model in TTS_MODELS:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
@@ -311,20 +316,23 @@ def tts_wav_url(text):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=120) as res:
+            with urllib.request.urlopen(req, timeout=60) as res:
                 data = json.loads(res.read().decode("utf-8"))
             pcm = base64.b64decode(data["candidates"][0]["content"]["parts"][0]["inlineData"]["data"])
-            wav = pcm_to_wav(pcm)
             uid = uuid.uuid4().hex
-            audio_store[uid] = wav
+            audio_store[uid] = (pcm_to_wav(pcm), "audio/wav")
             return f"{BASE_URL}/audio/{uid}"
-        except HTTPError as he:
-            last_err = he
-            print("TTS model fail:", model, he.code, he.read().decode()[:300])
         except Exception as e:
-            last_err = e
-            print("TTS model fail:", model, e)
-    raise last_err
+            print("Gemini TTS fail:", model, e)
+    try:
+        buf = io.BytesIO()
+        gTTS(text=text, lang="te").write_to_fp(buf)
+        uid = uuid.uuid4().hex
+        audio_store[uid] = (buf.getvalue(), "audio/mpeg")
+        return f"{BASE_URL}/audio/{uid}"
+    except Exception as e:
+        print("gTTS fail:", e)
+        raise e
 
 
 def parse_json_reply(raw):
@@ -404,10 +412,11 @@ def health():
 
 @app.get("/audio/{uid}")
 def get_audio(uid: str):
-    data = audio_store.get(uid)
-    if not data:
+    item = audio_store.get(uid)
+    if not item:
         return Response(status_code=404)
-    return Response(content=data, media_type="audio/wav")
+    data, mime = item
+    return Response(content=data, media_type=mime)
 
 
 @app.post("/whatsapp")
@@ -454,7 +463,7 @@ async def whatsapp_webhook(
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
             try:
-                audio_url = tts_wav_url(reply_text)
+                audio_url = make_voice_url(reply_text)
                 send(phone, None, media_url=audio_url)
                 log_chat("OUT", phone, f"🔊 {reply_text}")
             except Exception as e:
@@ -473,7 +482,7 @@ async def whatsapp_webhook(
 
     if reply and (wants_voice(text) or "fees" in text.lower() or "ఫీజు" in text or "కమిషన్" in text):
         try:
-            audio_url = tts_wav_url(reply)
+            audio_url = make_voice_url(reply)
             send(phone, None, media_url=audio_url)
             log_chat("OUT", phone, f"🔊 {reply}")
         except Exception as e:
