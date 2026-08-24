@@ -46,12 +46,11 @@ audio_store = {}
 
 FALLBACK = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
-    "మీ పేరు & వివరాలు రాయండి (లేదా voice note పంపండి 🎤):\n"
+    "మీ పేరు & వివరాలు రాయండి:\n"
     "• పేరు?\n"
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget?\n\n"
-    "🎤 Voice note పంపినా నేను వింటాను — voice లోనే సమాధానం ఇస్తాను! 🔊\n\n"
     "📞 శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
     "📱 Direct WhatsApp: 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
@@ -239,7 +238,6 @@ def build_system():
         "3. ఆ తర్వాత ఫీజు వివరాలు చెప్పు:\n"
         "   • ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
         "   • ₹8,000 లోపు అద్దె ఇళ్లకు: కమిషన్ ₹4,000 మాత్రమే.\n"
-        "   • 3 లేదా అంతకంటే ఎక్కువ పెద్దవాళ్లు ఉంటే → కమిషన్ ₹5,000.\n"
         "   • 2BHK అడిగితే → కమిషన్ ₹6,000.\n"
         "   • ఇళ్లు చూపించే ముందు ₹800 visiting fee 💸 (కమిషన్ నుండి తగ్గించబడుతుంది ✂️).\n"
         "   • మా సర్వీస్: మీ బడ్జెట్ లో 3 లేదా 5 ఇళ్లు చూపిస్తాము. ఆ రోజు ఇల్లు set కాకపోతే, ఇల్లు దొరికేవరకు 1 month validity ఉంటుంది ఆ ₹800 కి.\n"
@@ -326,7 +324,8 @@ def make_voice_url(text):
             print("Gemini TTS fail:", model, e)
     try:
         buf = io.BytesIO()
-        gTTS(text=text, lang="te").write_to_fp(buf)
+        # Speed up: lang_code='te', tld='co.in', slow=False
+        gTTS(text=text, lang='te', tld='co.in', slow=False).write_to_fp(buf)
         uid = uuid.uuid4().hex
         audio_store[uid] = (buf.getvalue(), "audio/mpeg")
         return f"{BASE_URL}/audio/{uid}"
