@@ -34,8 +34,6 @@ YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentala
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
 PROPERTIES_SHEET_URL = os.getenv("PROPERTIES_SHEET_URL", "")
 YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
-ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
@@ -302,18 +300,6 @@ def clean_text_for_tts(text):
     return text
 
 
-def short_for_tts(text, limit=400):
-    t = clean_text_for_tts(text)
-    if len(t) <= limit:
-        return t
-    cut = t[:limit]
-    for sep in (".", "!", "?", "\n"):
-        idx = cut.rfind(sep)
-        if idx > 100:
-            return cut[:idx + 1]
-    return cut
-
-
 def detect_lang(text):
     hi_count = len(re.findall(r"[\u0900-\u097F]", text))
     te_count = len(re.findall(r"[\u0C00-\u0C7F]", text))
@@ -353,7 +339,7 @@ def azure_tts(text, lang):
             },
             method="POST",
         )
-        with urllib.request.urlopen(tts_req, timeout=30) as res:
+        with urllib.request.urlopen(tts_req, timeout=60) as res:
             audio_data = res.read()
         if len(audio_data) > 1000:
             print(f"Azure TTS success: {voice_map[lang]}, {len(audio_data)} bytes")
@@ -363,36 +349,55 @@ def azure_tts(text, lang):
     return None
 
 
+def split_text_for_tts(text, max_chunk=500):
+    if len(text) <= max_chunk:
+        return [text]
+    chunks = []
+    current = ""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    for sentence in sentences:
+        if len(current) + len(sentence) + 1 <= max_chunk:
+            current = (current + " " + sentence).strip()
+        else:
+            if current:
+                chunks.append(current)
+            current = sentence
+    if current:
+        chunks.append(current)
+    final_chunks = []
+    for chunk in chunks:
+        if len(chunk) > max_chunk:
+            for i in range(0, len(chunk), max_chunk):
+                final_chunks.append(chunk[i:i + max_chunk])
+        else:
+            final_chunks.append(chunk)
+    return final_chunks
 
 
-
-def make_voice_url(text):
-    text = short_for_tts(text)
+def make_voice_urls(text):
+    text = clean_text_for_tts(text)
     lang = detect_lang(text)
-    print(f"TTS request: lang={lang}, text={text[:60]}...")
-
-    audio = azure_tts(text, lang)
-    if audio:
-        stats["tts_engine"] = "azure"
-    else:
-        audio = elevenlabs_tts(text)
-        if audio:
-            stats["tts_engine"] = "elevenlabs"
-    if not audio:
-        try:
-            buf = io.BytesIO()
-            gTTS(text=text, lang=lang, slow=False).write_to_fp(buf)
-            audio = buf.getvalue()
-            stats["tts_engine"] = "gtts"
-            print(f"gTTS fallback: lang={lang}")
-        except Exception as e:
-            print(f"gTTS fail: {e}")
-            return None
-
-    uid = uuid.uuid4().hex
-    audio_store[uid] = (audio, "audio/mpeg")
-    stats["voice_out"] += 1
-    return f"{BASE_URL}/audio/{uid}"
+    chunks = split_text_for_tts(text)
+    print(f"TTS request: lang={lang}, chunks={len(chunks)}")
+    urls = []
+    for i, chunk in enumerate(chunks):
+        audio = azure_tts(chunk, lang)
+        engine = "azure"
+        if not audio:
+            try:
+                buf = io.BytesIO()
+                gTTS(text=chunk, lang=lang, slow=False).write_to_fp(buf)
+                audio = buf.getvalue()
+                engine = "gtts"
+            except Exception as e:
+                print(f"gTTS fail chunk {i}: {e}")
+                continue
+        uid = uuid.uuid4().hex
+        audio_store[uid] = (audio, "audio/mpeg")
+        stats["voice_out"] += 1
+        stats["tts_engine"] = engine
+        urls.append(f"{BASE_URL}/audio/{uid}")
+    return urls
 
 
 def parse_json_reply(raw):
@@ -470,7 +475,6 @@ def debug():
         "stats": stats,
         "azure_key_set": bool(AZURE_SPEECH_KEY),
         "azure_region": AZURE_SPEECH_REGION,
-        "elevenlabs_key_set": bool(ELEVENLABS_API_KEY),
         "gemini_key_set": bool(GEMINI_API_KEY),
         "audio_files": len(audio_store),
     }
@@ -533,7 +537,7 @@ async def whatsapp_webhook(
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
             send(phone, reply_text)
-                       for url in make_voice_urls(reply_text):
+            for url in make_voice_urls(reply_text):
                 send(phone, None, media_url=url)
                 log_chat("OUT", phone, "🔊 (voice reply)")
         else:
@@ -547,7 +551,7 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-       for url in make_voice_urls(final):
+    for url in make_voice_urls(final):
         send(phone, None, media_url=url)
         log_chat("OUT", phone, "🔊 (voice reply)")
 
