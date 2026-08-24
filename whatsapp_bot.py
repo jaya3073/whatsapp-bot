@@ -5,9 +5,7 @@ import json
 import time
 import uuid
 import base64
-import struct
 import urllib.request
-from urllib.error import HTTPError
 import pandas as pd
 from gtts import gTTS
 from fastapi import FastAPI, Form, Response
@@ -38,6 +36,8 @@ PROPERTIES_SHEET_URL = os.getenv("PROPERTIES_SHEET_URL", "")
 YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
 CONTACTS_LINE = (
     "📌 OLX links WhatsApp లో open అవ్వాలంటే ఈ రెండు నంబర్లు మీ phone contacts లో save చేసుకోండి: "
@@ -48,6 +48,7 @@ opted_out = set()
 sessions = {}
 _cache = {}
 audio_store = {}
+stats = {"total": 0, "voice_in": 0, "voice_out": 0, "tts_engine": "none"}
 
 FALLBACK = (
     "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
@@ -66,7 +67,6 @@ FALLBACK = (
 
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
-        print("⚠️ SHEET_WEBHOOK_URL not set!")
         return
     try:
         req = urllib.request.Request(
@@ -75,14 +75,12 @@ def push_to_sheet(row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        response = urllib.request.urlopen(req, timeout=10)
-        print(f"✅ Sheet push success: {row.get('sheet')}")
+        urllib.request.urlopen(req, timeout=10)
     except Exception as e:
-        print(f"❌ Sheet error: {e}")
+        print("Sheet error:", e)
 
 
 def log_chat(direction, phone, body):
-    """Save chat to Google Sheets"""
     push_to_sheet({
         "sheet": "Chats",
         "direction": direction,
@@ -238,10 +236,10 @@ def youtube_context():
 def build_system():
     return (
         "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
-        "Telugu, English, Tanglish, Hindi — client ఏ భాషలో మాట్లాడితే **అదే భాషలో స్వచ్ఛంగా** సమాధానం ఇవ్వు. "
+        "Telugu, English, Tanglish, Hindi — client ఏ భాషలో మాట్లాడితే అదే భాషలో స్వచ్ఛంగా సమాధానం ఇవ్వు. "
         "Hindi client కి పూర్తి Hindi (Devanagari) లోనే — Telugu పదాలు కలపకు. Telugu client కి Telugu లోనే.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
-        "నీవు voice notes వినగలవు 🎤 మరియు voice లో సమాధానం ఇస్తావు 🔊.\n\n"
+        "నీవు voice notes వినగలవు 🎤 మరియు ప్రతి సమాధానం voice లో కూడా పంపుతావు 🔊.\n\n"
         "సంభాషణ దశలు:\n"
         "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
@@ -298,7 +296,8 @@ def clean_text_for_tts(text):
         u"\U00002000-\U0000206F"
         "]+", flags=re.UNICODE)
     text = emoji_pattern.sub('', text)
-    text = re.sub(r"[*_#>`]", "", text)
+    text = re.sub(r"[*_#>`•]", "", text)
+    text = re.sub(r"https?://\S+", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
@@ -316,67 +315,107 @@ def short_for_tts(text, limit=400):
 
 
 def detect_lang(text):
-    """Detect language from text content"""
-    # Hindi characters (Devanagari)
-    if re.search(r"[\u0900-\u097F]", text):
+    hi_count = len(re.findall(r"[\u0900-\u097F]", text))
+    te_count = len(re.findall(r"[\u0C00-\u0C7F]", text))
+    if hi_count > te_count and hi_count > 3:
         return "hi"
-    # Telugu characters
-    if re.search(r"[\u0C00-\u0C7F]", text):
+    if te_count > 0:
         return "te"
-    # English fallback
     return "en"
+
+
+def azure_tts(text, lang):
+    if not AZURE_SPEECH_KEY:
+        return None
+    voice_map = {"te": "te-IN-ShrutiNeural", "hi": "hi-IN-SwaraNeural", "en": "en-IN-NeerjaNeural"}
+    lang_map = {"te": "te-IN", "hi": "hi-IN", "en": "en-IN"}
+    try:
+        token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+        token_req = urllib.request.Request(
+            token_url, data=b"",
+            headers={"Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY, "Content-Length": "0"},
+            method="POST",
+        )
+        with urllib.request.urlopen(token_req, timeout=10) as res:
+            token = res.read().decode()
+        ssml = (
+            f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{lang_map[lang]}'>"
+            f"<voice name='{voice_map[lang]}'><prosody rate='+10%'>{text}</prosody></voice></speak>"
+        )
+        tts_req = urllib.request.Request(
+            f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
+            data=ssml.encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
+                "User-Agent": "ShivaBot",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(tts_req, timeout=30) as res:
+            audio_data = res.read()
+        if len(audio_data) > 1000:
+            print(f"Azure TTS success: {voice_map[lang]}, {len(audio_data)} bytes")
+            return audio_data
+    except Exception as e:
+        print(f"Azure TTS error: {e}")
+    return None
+
+
+def elevenlabs_tts(text):
+    if not ELEVENLABS_API_KEY:
+        return None
+    try:
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
+        payload = {
+            "text": text,
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=60) as res:
+            data = res.read()
+        if len(data) > 1000:
+            print(f"ElevenLabs TTS success: {len(data)} bytes")
+            return data
+    except Exception as e:
+        print(f"ElevenLabs TTS error: {e}")
+    return None
 
 
 def make_voice_url(text):
     text = short_for_tts(text)
     lang = detect_lang(text)
-    
-    print(f"🔊 Generating voice for: {text[:50]}... (lang: {lang})")
+    print(f"TTS request: lang={lang}, text={text[:60]}...")
 
-    # Try ElevenLabs first (if API key available)
-    if ELEVENLABS_API_KEY:
+    audio = azure_tts(text, lang)
+    if audio:
+        stats["tts_engine"] = "azure"
+    else:
+        audio = elevenlabs_tts(text)
+        if audio:
+            stats["tts_engine"] = "elevenlabs"
+    if not audio:
         try:
-            url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-            payload = {
-                "text": text,
-                "model_id": "eleven_multilingual_v2",
-                "voice_settings": {
-                    "stability": 0.75,
-                    "similarity_boost": 0.75,
-                    "style": 0.0,
-                    "use_speaker_boost": True
-                },
-            }
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "xi-api-key": ELEVENLABS_API_KEY,
-                    "Content-Type": "application/json",
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=60) as res:
-                data = res.read()
-            uid = uuid.uuid4().hex
-            audio_store[uid] = (data, "audio/mpeg")
-            print("✅ ElevenLabs TTS success")
-            return f"{BASE_URL}/audio/{uid}"
-            
+            buf = io.BytesIO()
+            gTTS(text=text, lang=lang, slow=False).write_to_fp(buf)
+            audio = buf.getvalue()
+            stats["tts_engine"] = "gtts"
+            print(f"gTTS fallback: lang={lang}")
         except Exception as e:
-            print(f"❌ ElevenLabs failed: {e}")
-    
-    # Fallback to gTTS
-    try:
-        buf = io.BytesIO()
-        gTTS(text=text, lang=lang, slow=False).write_to_fp(buf)
-        uid = uuid.uuid4().hex
-        audio_store[uid] = (buf.getvalue(), "audio/mpeg")
-        print(f"✅ gTTS success, lang: {lang}")
-        return f"{BASE_URL}/audio/{uid}"
-    except Exception as e:
-        print(f"❌ gTTS failed: {e}")
-        raise e
+            print(f"gTTS fail: {e}")
+            return None
+
+    uid = uuid.uuid4().hex
+    audio_store[uid] = (audio, "audio/mpeg")
+    stats["voice_out"] += 1
+    return f"{BASE_URL}/audio/{uid}"
 
 
 def parse_json_reply(raw):
@@ -392,19 +431,14 @@ def parse_json_reply(raw):
         return "", raw
 
 
-def wants_voice(text):
-    low = text.lower()
-    return any(w in low for w in ("voice", "audio", "వాయిస్", "ఆడియో", "మాట్లాడు", "వినిపించు", "చెప్పు", "speak", "say", "बोलो", "आवाज़"))
-
-
 def ask_gemini_audio(phone, audio_bytes, mime):
     hist = sessions.get(phone, [])
     instruction = (
-        "ఇది client పంపిన voice note. "
-        "ముందు దాన్ని transcript చేయి, ఆ తర్వాత assistant గా సమాధానం ఇవ్వు. "
-        "**voice note ఏ భాషలో ఉంటే సమాధానం కూడా అదే భాషలో స్వచ్ఛంగా ఇవ్వు** "
-        "(Hindi అయితే పూర్తి Hindi Devanagari లోనే — Telugu కలపకు; Telugu అయితే Telugu లోనే). "
-        "JSON మాత్రమే ఇవ్వు: {\"transcript\": \"...\", \"reply\": \"...\"}"
+        "ఇది client పంపిన voice note. ముందు దాన్ని transcript చేయి, "
+        "తర్వాత assistant గా సమాధానం ఇవ్వు. "
+        "voice note ఏ భాషలో ఉంటే సమాధానం కూడా అదే భాషలో స్వచ్ఛంగా ఇవ్వు "
+        "(Hindi అయితే పూర్తి Hindi Devanagari లోనే, Telugu అయితే Telugu లోనే). "
+        "JSON మాత్రమే: {\"transcript\": \"...\", \"reply\": \"...\"}"
     )
     parts = [
         {"text": instruction},
@@ -422,15 +456,12 @@ def ask_gemini_audio(phone, audio_bytes, mime):
 def ask_gemini(phone, user_text):
     if not GEMINI_API_KEY:
         return None
-
     hist = sessions.get(phone, [])
     hist.append({"role": "user", "text": user_text})
     hist = hist[-12:]
     sessions[phone] = hist
-
     contents = [{"role": m["role"], "parts": [{"text": m["text"]}]} for m in hist]
     system = {"parts": [{"text": build_system()}]}
-
     reply = None
     try:
         reply = _call_gemini({
@@ -444,7 +475,6 @@ def ask_gemini(phone, user_text):
             reply = _call_gemini({"systemInstruction": system, "contents": contents})
         except Exception as e2:
             print("Gemini error:", e2)
-
     if reply:
         hist.append({"role": "model", "text": reply})
         sessions[phone] = hist[-12:]
@@ -454,6 +484,19 @@ def ask_gemini(phone, user_text):
 @app.get("/")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/debug")
+def debug():
+    return {
+        "status": "running",
+        "stats": stats,
+        "azure_key_set": bool(AZURE_SPEECH_KEY),
+        "azure_region": AZURE_SPEECH_REGION,
+        "elevenlabs_key_set": bool(ELEVENLABS_API_KEY),
+        "gemini_key_set": bool(GEMINI_API_KEY),
+        "audio_files": len(audio_store),
+    }
 
 
 @app.get("/audio/{uid}")
@@ -474,10 +517,12 @@ async def whatsapp_webhook(
 ):
     phone = From.replace("whatsapp:", "")
     text = (Body or "").strip()
+    stats["total"] += 1
+    print(f"=== MSG #{stats['total']} from {phone}: media={NumMedia}, text={text[:50]} ===")
 
     if phone in opted_out or text.lower() in ("stop", "unsubscribe"):
         opted_out.add(phone)
-        send(phone, "మీరు ఇకపై మా నుంచి messages పొందరు. ధన్యవాదాలు. 🙏")
+        send(phone, "మీరు ఇకపై messages పొందరు. 🙏")
         return Response(str(MessagingResponse()), media_type="text/xml")
 
     if phone == OWNER_WHATSAPP:
@@ -495,63 +540,41 @@ async def whatsapp_webhook(
     except Exception:
         n_media = 0
 
-    # === VOICE NOTE PROCESSING ===
     if n_media > 0 and MediaUrl0:
+        stats["voice_in"] += 1
         transcript, reply_text = "", None
         try:
             audio_bytes, mime = download_twilio_media(MediaUrl0)
             transcript, reply_text = ask_gemini_audio(phone, audio_bytes, mime)
+            print(f"Voice transcript: {(transcript or 'empty')[:80]}")
         except Exception as e:
-            print("Voice note error:", e)
-        
+            print(f"Voice note error: {e}")
         log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
-        
         if reply_text:
             hist = sessions.get(phone, [])
             hist.append({"role": "user", "text": f"(voice) {transcript or 'voice note'}"})
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
-            
-            # ALWAYS send voice reply for voice notes
-            try:
-                audio_url = make_voice_url(reply_text)
+            send(phone, reply_text)
+            audio_url = make_voice_url(reply_text)
+            if audio_url:
                 send(phone, None, media_url=audio_url)
-                log_chat("OUT", phone, f"🔊 {reply_text}")
-            except Exception as e:
-                print("TTS error:", e)
-                # Fallback to text if voice fails
-                send(phone, reply_text)
-                log_chat("OUT", phone, reply_text)
+                log_chat("OUT", phone, "🔊 (voice reply)")
         else:
             send(phone, FALLBACK)
+            audio_url = make_voice_url(FALLBACK)
+            if audio_url:
+                send(phone, None, media_url=audio_url)
         return Response(str(MessagingResponse()), media_type="text/xml")
 
-    # === TEXT MESSAGE PROCESSING ===
     log_chat("IN", phone, text)
-
     reply = ask_gemini(phone, text)
     final = reply if reply else FALLBACK
-    
-    # Send text message first
     send(phone, final)
 
-    # Then send voice reply if requested OR if it's a fees-related query
-    should_send_voice = (
-        wants_voice(text) or 
-        "fees" in text.lower() or 
-        "ఫీజు" in text or 
-        "కమిషన్" in text or 
-        "వాయిస్" in text or
-        "audio" in text.lower() or
-        "voice" in text.lower()
-    )
-    
-    if reply and should_send_voice:
-        try:
-            audio_url = make_voice_url(reply)
-            send(phone, None, media_url=audio_url)
-            log_chat("OUT", phone, f"🔊 {reply}")
-        except Exception as e:
-            print("TTS error:", e)
+    audio_url = make_voice_url(final)
+    if audio_url:
+        send(phone, None, media_url=audio_url)
+        log_chat("OUT", phone, "🔊 (voice reply)")
 
     return Response(str(MessagingResponse()), media_type="text/xml")
