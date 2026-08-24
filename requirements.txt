@@ -1,7 +1,7 @@
 fastapi
 uvicorn
 twilio
+python-dotenv
 pandas
 openpyxl
-python-dotenv
-python-multipart
+gTTS
