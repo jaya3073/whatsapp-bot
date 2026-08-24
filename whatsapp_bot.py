@@ -282,6 +282,13 @@ def download_twilio_media(url):
         return res.read(), (res.headers.get_content_type() or "audio/mpeg")
 
 
+def _phone_to_digits(m):
+    digits = re.sub(r"\D", "", m.group(0))
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    return " " + " ".join(digits) + " "
+
+
 def clean_text_for_tts(text):
     emoji_pattern = re.compile(
         "["
@@ -296,6 +303,7 @@ def clean_text_for_tts(text):
     text = emoji_pattern.sub('', text)
     text = re.sub(r"[*_#>`•]", "", text)
     text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", _phone_to_digits, text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
