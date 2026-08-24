@@ -363,30 +363,7 @@ def azure_tts(text, lang):
     return None
 
 
-def elevenlabs_tts(text):
-    if not ELEVENLABS_API_KEY:
-        return None
-    try:
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
-        payload = {
-            "text": text,
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-        }
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"xi-api-key": ELEVENLABS_API_KEY, "Content-Type": "application/json", "Accept": "audio/mpeg"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=60) as res:
-            data = res.read()
-        if len(data) > 1000:
-            print(f"ElevenLabs TTS success: {len(data)} bytes")
-            return data
-    except Exception as e:
-        print(f"ElevenLabs TTS error: {e}")
-    return None
+
 
 
 def make_voice_url(text):
@@ -556,15 +533,13 @@ async def whatsapp_webhook(
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
             send(phone, reply_text)
-            audio_url = make_voice_url(reply_text)
-            if audio_url:
-                send(phone, None, media_url=audio_url)
+                       for url in make_voice_urls(reply_text):
+                send(phone, None, media_url=url)
                 log_chat("OUT", phone, "🔊 (voice reply)")
         else:
             send(phone, FALLBACK)
-            audio_url = make_voice_url(FALLBACK)
-            if audio_url:
-                send(phone, None, media_url=audio_url)
+            for url in make_voice_urls(FALLBACK):
+                send(phone, None, media_url=url)
         return Response(str(MessagingResponse()), media_type="text/xml")
 
     log_chat("IN", phone, text)
@@ -572,9 +547,8 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    audio_url = make_voice_url(final)
-    if audio_url:
-        send(phone, None, media_url=audio_url)
+       for url in make_voice_urls(final):
+        send(phone, None, media_url=url)
         log_chat("OUT", phone, "🔊 (voice reply)")
 
     return Response(str(MessagingResponse()), media_type="text/xml")
