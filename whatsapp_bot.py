@@ -341,7 +341,7 @@ def azure_tts(text, lang):
             token = res.read().decode()
         ssml = (
             f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{lang_map[lang]}'>"
-            f"<voice name='{voice_map[lang]}'><prosody rate='+10%'>{text}</prosody></voice></speak>"
+            f"<voice name='{voice_map[lang]}'><prosody rate='+20%'>{text}</prosody></voice></speak>"
         )
         tts_req = urllib.request.Request(
             f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
