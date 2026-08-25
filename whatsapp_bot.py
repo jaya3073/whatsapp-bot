@@ -55,7 +55,7 @@ FALLBACK = (
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget?\n\n"
-    "📞 శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
+    " శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
     "📱 Direct WhatsApp: 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
     f" YouTube: {YOUTUBE_LINK}\n\n"
@@ -169,7 +169,7 @@ def handle_owner_reply(owner_phone, text):
         target = normalize_phone(parts[1])
         msg = parts[2].strip()
     if not target:
-        send(owner_phone, "సరైన నంబర్ ఇవ్వండి 🙏\nఉదా: REPLY 8074915644 మీ మెసేజ్")
+        send(owner_phone, "సరైన నంబర్ ఇవ్వండి \nఉదా: REPLY 8074915644 మీ మెసేజ్")
         return
     send(target, msg)
     send(owner_phone, f"✅ మీ మెసేజ్ పంపబడింది → {target}")
@@ -233,11 +233,11 @@ def youtube_context():
 
 def build_system():
     return (
-        "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
+        "నీవు 'శివ హస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
         "Telugu, English, Tanglish, Hindi — client ఏ భాషలో మాట్లాడితే అదే భాషలో స్వచ్ఛంగా సమాధానం ఇవ్వు. "
         "Hindi client కి పూర్తి Hindi (Devanagari) లోనే — Telugu పదాలు కలపకు. Telugu client కి Telugu లోనే.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
-        "నీవు voice notes వినగలవు 🎤 మరియు ప్రతి సమాధానం voice లో కూడా పంపుతావు 🔊.\n\n"
+        "నీవు voice notes వినగలవు  మరియు ప్రతి సమాధానం voice లో కూడా పంపుతావు 🔊.\n\n"
         "సంభాషణ దశలు:\n"
         "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
@@ -406,43 +406,72 @@ def azure_tts(text, lang):
 
 
 def split_text_for_tts(text, max_chunk=500):
-    if len(text) <= max_chunk:
-        return [text]
-    chunks = []
-    current = ""
-    sentences = re.split(r"(?<=[.!?])\s+", text)
+    """Split text into chunks with fees info first"""
+    
+    # Remove phone numbers
+    text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", "", text)
+    
+    # Separate fees/service info from other content
+    fees_content = []
+    other_content = []
+    
+    sentences = re.split(r'[.!?]+', text)
+    
     for sentence in sentences:
-        if len(current) + len(sentence) + 1 <= max_chunk:
-            current = (current + " " + sentence).strip()
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        
+        # Check if it's fees/service related
+        if any(keyword in sentence.lower() for keyword in ['కమిషన్', 'fee', 'visiting', 'సర్వీస్', 'validity']):
+            fees_content.append(sentence)
         else:
-            if current:
-                chunks.append(current)
-            current = sentence
-    if current:
-        chunks.append(current)
-    final_chunks = []
-    for chunk in chunks:
-        if len(chunk) > max_chunk:
-            for i in range(0, len(chunk), max_chunk):
-                final_chunks.append(chunk[i:i + max_chunk])
+            other_content.append(sentence)
+    
+    # Combine: fees first, then others
+    prioritized = fees_content + other_content
+    
+    # Split into chunks
+    chunks = []
+    current_chunk = ""
+    
+    for sentence in prioritized:
+        if len(current_chunk) + len(sentence) + 1 <= max_chunk:
+            if current_chunk:
+                current_chunk += " " + sentence
+            else:
+                current_chunk = sentence
         else:
-            final_chunks.append(chunk)
-    return final_chunks
+            if current_chunk:
+                chunks.append(current_chunk)
+            current_chunk = sentence
+    
+    if current_chunk:
+        chunks.append(current_chunk)
+    
+    return chunks if chunks else [text]
 
 
 def make_voice_urls(text):
+    """Generate voice URLs with proper ordering"""
     text = clean_text_for_tts(text)
     lang = detect_lang(text)
     
-    # Split into logical sections with proper ordering
-    sections = split_into_ordered_sections(text)
+    # Split with fees info first
+    chunks = split_text_for_tts(text)
+    
+    print(f"TTS request: lang={lang}, chunks={len(chunks)}")
     
     urls = []
-    for i, section in enumerate(sections):
-        audio = azure_tts(section, lang)
-        if not audio:
-            print(f"Azure TTS failed for section {i}, skipping")
+    for i, chunk in enumerate(chunks):
+        if not chunk.strip():
             continue
+            
+        audio = azure_tts(chunk, lang)
+        if not audio:
+            print(f"Azure TTS failed for chunk {i}, skipping")
+            continue
+            
         uid = uuid.uuid4().hex
         audio_store[uid] = (audio, "audio/mpeg")
         stats["voice_out"] += 1
@@ -452,52 +481,40 @@ def make_voice_urls(text):
     return urls
 
 
-def split_into_ordered_sections(text):
-    """Split text into sections with correct order"""
-    
-    # Remove phone numbers first
-    text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", "", text)
-    
-    sections = []
-    
-    # Section 1: Service & Fees info (should come first)
-    service_fees_pattern = r'(మా సర్వీస్.*?₹5,000|ఏజెన్సీ కమిషన్.*?₹5,000|Visiting Fee.*?₹800)'
-    service_matches = re.findall(service_fees_pattern, text, re.IGNORECASE | re.DOTALL)
-    if service_matches:
-        sections.extend(service_matches)
-    
-    # Section 2: House details
-    house_patterns = [
-        r'(ఇళ్లు చూపించే.*?OLX|YouTube.*?video|budget.*?ఇళ్లు)',
-        r'(2BHK|3BHK|1BHK.*?budget)',
+def parse_json_reply(raw):
+    try:
+        clean = raw.strip()
+        if clean.startswith("```"):
+            clean = clean.strip("`")
+            if clean.startswith("json"):
+                clean = clean[4:]
+        obj = json.loads(clean)
+        return obj.get("transcript", ""), obj.get("reply", raw)
+    except Exception:
+        return "", raw
+
+
+def ask_gemini_audio(phone, audio_bytes, mime):
+    hist = sessions.get(phone, [])
+    instruction = (
+        "ఇది client పంపిన voice note. ముందు దాన్ని transcript చేయి, "
+        "తర్వాత assistant గా సమాధానం ఇవ్వు. "
+        "voice note ఏ భాషలో ఉంటే సమాధానం కూడా అదే భాషలో స్వచ్ఛంగా ఇవ్వు "
+        "(Hindi అయితే పూర్తి Hindi Devanagari లోనే, Telugu అయితే Telugu లోనే). "
+        "JSON మాత్రమే: {\"transcript\": \"...\", \"reply\": \"...\"}"
+    )
+    parts = [
+        {"text": instruction},
+        {"inlineData": {"mimeType": mime, "data": base64.b64encode(audio_bytes).decode()}},
     ]
-    
-    for pattern in house_patterns:
-        house_matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
-        sections.extend(house_matches)
-    
-    # Section 3: Contact info (should come last)
-    contact_patterns = [
-        r'(శివ గారికి కాల్|Direct WhatsApp|WhatsApp Chat Bot)',
-        r'(8500701521|8074915644)',
-    ]
-    
-    for pattern in contact_patterns:
-        contact_matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
-        sections.extend(contact_matches)
-    
-    # Add remaining content that doesn't match patterns
-    remaining = text
-    for section in sections:
-        remaining = remaining.replace(section, "")
-    
-    if remaining.strip():
-        sections.append(remaining.strip())
-    
-    # Filter out empty sections
-    sections = [s.strip() for s in sections if s.strip()]
-    
-    return sections if sections else [text]
+    contents = [{"role": m["role"], "parts": [{"text": m["text"]}]} for m in hist]
+    contents.append({"role": "user", "parts": parts})
+    raw = _call_gemini({
+        "systemInstruction": {"parts": [{"text": build_system()}]},
+        "contents": contents,
+    })
+    return parse_json_reply(raw)
+
 
 def ask_gemini(phone, user_text):
     if not GEMINI_API_KEY:
