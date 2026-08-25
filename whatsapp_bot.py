@@ -309,7 +309,15 @@ def _number_to_digits(m):
     return ' '.join(list(num)) + ' '
 
 
+def _phone_to_digits(m):
+    digits = re.sub(r"\D", "", m.group(0))
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    return " " + " ".join(digits) + " "
+
+
 def clean_text_for_tts(text):
+    # Remove emojis first
     emoji_pattern = re.compile(
         "["
         u"\U0001F600-\U0001F64F"
@@ -321,11 +329,22 @@ def clean_text_for_tts(text):
         u"\U00002000-\U0000206F"
         "]+", flags=re.UNICODE)
     text = emoji_pattern.sub('', text)
+    
+    # Remove special characters
     text = re.sub(r"[*_#>`•]", "", text)
+    
+    # Remove URLs
     text = re.sub(r"https?://\S+", " ", text)
-    text = re.sub(r"\d+", _number_to_digits, text)  # ← NEW LINE
-    text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", _phone_to_digits, text)
+    
+    # Keep phone numbers as-is (don't convert to digits)
+    # This prevents "8000" from becoming "eight zero zero zero"
+    
+    # Remove other numbers but keep currency amounts readable
+    text = re.sub(r"₹(\d+)", r"\1 rupees", text)  # ₹8000 → 8000 rupees
+    
+    # Clean up extra spaces
     text = re.sub(r"\s+", " ", text).strip()
+    
     return text
 
 
