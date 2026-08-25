@@ -49,7 +49,7 @@ audio_store = {}
 stats = {"total": 0, "voice_in": 0, "voice_out": 0, "tts_engine": "none"}
 
 FALLBACK = (
-    "నమస్కారం! 🙏 శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
+    "నమస్కారం!  శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
     "మీ పేరు & వివరాలు రాయండి:\n"
     "• పేరు?\n"
     "• ఎంత మంది ఉంటారు?\n"
@@ -58,7 +58,7 @@ FALLBACK = (
     "📞 శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
     "📱 Direct WhatsApp: 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
-    f"🎬 YouTube: {YOUTUBE_LINK}\n\n"
+    f" YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
 )
 
@@ -252,7 +252,7 @@ def build_system():
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
         "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
-        "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/ఊహల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
+        "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/హల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
         "- లిస్ట్ లో లేనిది అడిగితే OLX profile చూడమని చెప్పు.\n"
         "- ఇతర విషయాలు అడిగితే మళ్లీ ఇళ్ల వైపు మళ్లించు.\n"
@@ -280,135 +280,6 @@ def download_twilio_media(url):
     req = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
     with urllib.request.urlopen(req, timeout=20) as res:
         return res.read(), (res.headers.get_content_type() or "audio/mpeg")
-
-
-def _phone_to_digits(m):
-    digits = re.sub(r"\D", "", m.group(0))
-    if digits.startswith("91") and len(digits) == 12:
-        digits = digits[2:]
-    return " " + " ".join(digits) + " "
-
-
-def _phone_to_digits(m):
-    digits = re.sub(r"\D", "", m.group(0))
-    if digits.startswith("91") and len(digits) == 12:
-        digits = digits[2:]
-    return " " + " ".join(digits) + " "
-
-
-def _phone_to_digits(m):
-    digits = re.sub(r"\D", "", m.group(0))
-    if digits.startswith("91") and len(digits) == 12:
-        digits = digits[2:]
-    return " " + " ".join(digits) + " "
-
-
-def _number_to_digits(m):
-    """Convert numbers to individual digits for TTS"""
-    num = m.group(0)
-    return ' '.join(list(num)) + ' '
-
-
-def _phone_to_digits(m):
-    digits = re.sub(r"\D", "", m.group(0))
-    if digits.startswith("91") and len(digits) == 12:
-        digits = digits[2:]
-    return " " + " ".join(digits) + " "
-
-
-def number_to_words(num):
-    """Convert numbers to English words"""
-    num = int(num)
-    
-    if num == 0:
-        return "zero"
-    
-    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", 
-             "seventeen", "eighteen", "nineteen"]
-    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
-    
-    def convert(n):
-        if n < 10:
-            return ones[n]
-        elif n < 20:
-            return teens[n-10]
-        elif n < 100:
-            return tens[n//10] + ("-" + ones[n%10] if n%10 != 0 else "")
-        elif n < 1000:
-            return ones[n//100] + " hundred" + (" and " + convert(n%100) if n%100 != 0 else "")
-        elif n < 1000000:
-            return convert(n//1000) + " thousand" + (" " + convert(n%1000) if n%1000 != 0 else "")
-        else:
-            return convert(n//1000000) + " million" + (" " + convert(n%1000000) if n%1000000 != 0 else "")
-    
-    return convert(num)
-
-
-def _phone_to_digits(m):
-    """Convert phone numbers to individual digits"""
-    digits = re.sub(r"\D", "", m.group(0))
-    if digits.startswith("91") and len(digits) == 12:
-        digits = digits[2:]
-    return " " + " ".join(digits) + " "
-
-
-def number_to_words(num):
-    """Convert numbers to English words"""
-    num = int(num)
-    
-    if num == 0:
-        return "zero"
-    
-    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", 
-             "seventeen", "eighteen", "nineteen"]
-    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
-    
-    def convert(n):
-        if n < 10:
-            return ones[n]
-        elif n < 20:
-            return teens[n-10]
-        elif n < 100:
-            return tens[n//10] + ("-" + ones[n%10] if n%10 != 0 else "")
-        elif n < 1000:
-            return ones[n//100] + " hundred" + (" and " + convert(n%100) if n%100 != 0 else "")
-        elif n < 1000000:
-            return convert(n//1000) + " thousand" + (" " + convert(n%1000) if n%1000 != 0 else "")
-        else:
-            return convert(n//1000000) + " million" + (" " + convert(n%1000000) if n%1000000 != 0 else "")
-    
-    return convert(num)
-
-
-def number_to_words(num):
-    """Convert numbers to English words"""
-    num = int(num)
-    
-    if num == 0:
-        return "zero"
-    
-    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", 
-             "seventeen", "eighteen", "nineteen"]
-    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
-    
-    def convert(n):
-        if n < 10:
-            return ones[n]
-        elif n < 20:
-            return teens[n-10]
-        elif n < 100:
-            return tens[n//10] + ("-" + ones[n%10] if n%10 != 0 else "")
-        elif n < 1000:
-            return ones[n//100] + " hundred" + (" and " + convert(n%100) if n%100 != 0 else "")
-        elif n < 1000000:
-            return convert(n//1000) + " thousand" + (" " + convert(n%1000) if n%1000 != 0 else "")
-        else:
-            return convert(n//1000000) + " million" + (" " + convert(n%1000000) if n%1000000 != 0 else "")
-    
-    return convert(num)
 
 
 def number_to_words(num):
@@ -460,10 +331,10 @@ def clean_text_for_tts(text):
     # Remove URLs
     text = re.sub(r"https?://\S+", " ", text)
     
-    # Remove unwanted words FIRST
+    # Remove unwanted words
     text = re.sub(r'Indian Rupees?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\bGST\b', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'₹', '', text)  # Just remove ₹ symbol, don't add "Rs"
+    text = re.sub(r'₹', '', text)
     
     # SKIP phone numbers completely (remove them from TTS)
     text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", " ", text)
@@ -483,6 +354,7 @@ def clean_text_for_tts(text):
     text = re.sub(r"\s+", " ", text).strip()
     
     return text
+
 
 def detect_lang(text):
     hi_count = len(re.findall(r"[\u0900-\u097F]", text))
@@ -566,20 +438,13 @@ def make_voice_urls(text):
     urls = []
     for i, chunk in enumerate(chunks):
         audio = azure_tts(chunk, lang)
-        engine = "azure"
         if not audio:
-            try:
-                buf = io.BytesIO()
-                gTTS(text=chunk, lang=lang, slow=False).write_to_fp(buf)
-                audio = buf.getvalue()
-                engine = "gtts"
-            except Exception as e:
-                print(f"gTTS fail chunk {i}: {e}")
-                continue
+            print(f"Azure TTS failed for chunk {i}, skipping")
+            continue
         uid = uuid.uuid4().hex
         audio_store[uid] = (audio, "audio/mpeg")
         stats["voice_out"] += 1
-        stats["tts_engine"] = engine
+        stats["tts_engine"] = "azure"
         urls.append(f"{BASE_URL}/audio/{uid}")
     return urls
 
