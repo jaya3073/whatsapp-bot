@@ -289,6 +289,13 @@ def _phone_to_digits(m):
     return " " + " ".join(digits) + " "
 
 
+def _phone_to_digits(m):
+    digits = re.sub(r"\D", "", m.group(0))
+    if digits.startswith("91") and len(digits) == 12:
+        digits = digits[2:]
+    return " " + " ".join(digits) + " "
+
+
 def clean_text_for_tts(text):
     emoji_pattern = re.compile(
         "["
