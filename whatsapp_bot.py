@@ -433,56 +433,71 @@ def split_text_for_tts(text, max_chunk=500):
 def make_voice_urls(text):
     text = clean_text_for_tts(text)
     lang = detect_lang(text)
-    chunks = split_text_for_tts(text)
-    print(f"TTS request: lang={lang}, chunks={len(chunks)}")
+    
+    # Split into logical sections with proper ordering
+    sections = split_into_ordered_sections(text)
+    
     urls = []
-    for i, chunk in enumerate(chunks):
-        audio = azure_tts(chunk, lang)
+    for i, section in enumerate(sections):
+        audio = azure_tts(section, lang)
         if not audio:
-            print(f"Azure TTS failed for chunk {i}, skipping")
+            print(f"Azure TTS failed for section {i}, skipping")
             continue
         uid = uuid.uuid4().hex
         audio_store[uid] = (audio, "audio/mpeg")
         stats["voice_out"] += 1
         stats["tts_engine"] = "azure"
         urls.append(f"{BASE_URL}/audio/{uid}")
+    
     return urls
 
 
-def parse_json_reply(raw):
-    try:
-        clean = raw.strip()
-        if clean.startswith("```"):
-            clean = clean.strip("`")
-            if clean.startswith("json"):
-                clean = clean[4:]
-        obj = json.loads(clean)
-        return obj.get("transcript", ""), obj.get("reply", raw)
-    except Exception:
-        return "", raw
-
-
-def ask_gemini_audio(phone, audio_bytes, mime):
-    hist = sessions.get(phone, [])
-    instruction = (
-        "ఇది client పంపిన voice note. ముందు దాన్ని transcript చేయి, "
-        "తర్వాత assistant గా సమాధానం ఇవ్వు. "
-        "voice note ఏ భాషలో ఉంటే సమాధానం కూడా అదే భాషలో స్వచ్ఛంగా ఇవ్వు "
-        "(Hindi అయితే పూర్తి Hindi Devanagari లోనే, Telugu అయితే Telugu లోనే). "
-        "JSON మాత్రమే: {\"transcript\": \"...\", \"reply\": \"...\"}"
-    )
-    parts = [
-        {"text": instruction},
-        {"inlineData": {"mimeType": mime, "data": base64.b64encode(audio_bytes).decode()}},
+def split_into_ordered_sections(text):
+    """Split text into sections with correct order"""
+    
+    # Remove phone numbers first
+    text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", "", text)
+    
+    sections = []
+    
+    # Section 1: Service & Fees info (should come first)
+    service_fees_pattern = r'(మా సర్వీస్.*?₹5,000|ఏజెన్సీ కమిషన్.*?₹5,000|Visiting Fee.*?₹800)'
+    service_matches = re.findall(service_fees_pattern, text, re.IGNORECASE | re.DOTALL)
+    if service_matches:
+        sections.extend(service_matches)
+    
+    # Section 2: House details
+    house_patterns = [
+        r'(ఇళ్లు చూపించే.*?OLX|YouTube.*?video|budget.*?ఇళ్లు)',
+        r'(2BHK|3BHK|1BHK.*?budget)',
     ]
-    contents = [{"role": m["role"], "parts": [{"text": m["text"]}]} for m in hist]
-    contents.append({"role": "user", "parts": parts})
-    raw = _call_gemini({
-        "systemInstruction": {"parts": [{"text": build_system()}]},
-        "contents": contents,
-    })
-    return parse_json_reply(raw)
-
+    
+    for pattern in house_patterns:
+        house_matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
+        sections.extend(house_matches)
+    
+    # Section 3: Contact info (should come last)
+    contact_patterns = [
+        r'(శివ గారికి కాల్|Direct WhatsApp|WhatsApp Chat Bot)',
+        r'(8500701521|8074915644)',
+    ]
+    
+    for pattern in contact_patterns:
+        contact_matches = re.findall(pattern, text, re.IGNORECASE | re.DOTALL)
+        sections.extend(contact_matches)
+    
+    # Add remaining content that doesn't match patterns
+    remaining = text
+    for section in sections:
+        remaining = remaining.replace(section, "")
+    
+    if remaining.strip():
+        sections.append(remaining.strip())
+    
+    # Filter out empty sections
+    sections = [s.strip() for s in sections if s.strip()]
+    
+    return sections if sections else [text]
 
 def ask_gemini(phone, user_text):
     if not GEMINI_API_KEY:
