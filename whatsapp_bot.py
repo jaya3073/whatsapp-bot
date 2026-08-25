@@ -316,6 +316,35 @@ def _phone_to_digits(m):
     return " " + " ".join(digits) + " "
 
 
+def number_to_words(num):
+    """Convert numbers to English words"""
+    num = int(num)
+    
+    if num == 0:
+        return "zero"
+    
+    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", 
+             "seventeen", "eighteen", "nineteen"]
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    
+    def convert(n):
+        if n < 10:
+            return ones[n]
+        elif n < 20:
+            return teens[n-10]
+        elif n < 100:
+            return tens[n//10] + ("-" + ones[n%10] if n%10 != 0 else "")
+        elif n < 1000:
+            return ones[n//100] + " hundred" + (" and " + convert(n%100) if n%100 != 0 else "")
+        elif n < 1000000:
+            return convert(n//1000) + " thousand" + (" " + convert(n%1000) if n%1000 != 0 else "")
+        else:
+            return convert(n//1000000) + " million" + (" " + convert(n%1000000) if n%1000000 != 0 else "")
+    
+    return convert(num)
+
+
 def clean_text_for_tts(text):
     # Remove emojis first
     emoji_pattern = re.compile(
@@ -336,11 +365,16 @@ def clean_text_for_tts(text):
     # Remove URLs
     text = re.sub(r"https?://\S+", " ", text)
     
-    # Keep phone numbers as-is (don't convert to digits)
-    # This prevents "8000" from becoming "eight zero zero zero"
+    # Convert numbers to English words
+    def replace_numbers(match):
+        num_str = match.group(0)
+        try:
+            num = int(num_str.replace(',', ''))
+            return number_to_words(num)
+        except:
+            return num_str
     
-    # Remove other numbers but keep currency amounts readable
-    text = re.sub(r"₹(\d+)", r"\1 rupees", text)  # ₹8000 → 8000 rupees
+    text = re.sub(r'\d{1,3}(?:,\d{3})*', replace_numbers, text)
     
     # Clean up extra spaces
     text = re.sub(r"\s+", " ", text).strip()
