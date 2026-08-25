@@ -382,6 +382,35 @@ def number_to_words(num):
     return convert(num)
 
 
+def number_to_words(num):
+    """Convert numbers to English words"""
+    num = int(num)
+    
+    if num == 0:
+        return "zero"
+    
+    ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", 
+             "seventeen", "eighteen", "nineteen"]
+    tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+    
+    def convert(n):
+        if n < 10:
+            return ones[n]
+        elif n < 20:
+            return teens[n-10]
+        elif n < 100:
+            return tens[n//10] + ("-" + ones[n%10] if n%10 != 0 else "")
+        elif n < 1000:
+            return ones[n//100] + " hundred" + (" and " + convert(n%100) if n%100 != 0 else "")
+        elif n < 1000000:
+            return convert(n//1000) + " thousand" + (" " + convert(n%1000) if n%1000 != 0 else "")
+        else:
+            return convert(n//1000000) + " million" + (" " + convert(n%1000000) if n%1000000 != 0 else "")
+    
+    return convert(num)
+
+
 def clean_text_for_tts(text):
     # Remove emojis first
     emoji_pattern = re.compile(
@@ -405,10 +434,10 @@ def clean_text_for_tts(text):
     # Remove unwanted words
     text = re.sub(r'Indian Rupees?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\bGST\b', '', text, flags=re.IGNORECASE)
-    text = re.sub(r'₹', 'Rs ', text)
+    text = re.sub(r'', 'Rs ', text)
     
-    # Handle phone numbers first (convert to digits)
-    text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", _phone_to_digits, text)
+    # SKIP phone numbers completely (remove them from TTS)
+    text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", " [PHONE NUMBER] ", text)
     
     # Convert other numbers to words
     def replace_numbers(match):
@@ -425,7 +454,6 @@ def clean_text_for_tts(text):
     text = re.sub(r"\s+", " ", text).strip()
     
     return text
-
 
 def detect_lang(text):
     hi_count = len(re.findall(r"[\u0900-\u097F]", text))
@@ -453,7 +481,7 @@ def azure_tts(text, lang):
             token = res.read().decode()
         ssml = (
             f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{lang_map[lang]}'>"
-            f"<voice name='{voice_map[lang]}'><prosody rate='+25%'>{text}</prosody></voice></speak>"
+            f"<voice name='{voice_map[lang]}'><prosody rate='+22%'>{text}</prosody></voice></speak>"
         )
         tts_req = urllib.request.Request(
             f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
