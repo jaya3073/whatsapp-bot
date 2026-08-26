@@ -37,7 +37,6 @@ YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
-# FIXED: Correct order with 8500701521 first
 CONTACTS_LINE = (
     " OLX links WhatsApp లో open అవ్వాలంటే ఈ రెండు నంబర్లు మీ phone contacts లో save చేసుకోండి: "
     "8500701521, 8074915644 ✅"
@@ -233,11 +232,11 @@ def youtube_context():
 
 def build_system():
     return (
-        "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
+        "నీవు 'శివ హస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
         "Telugu, English, Tanglish, Hindi — client ఏ భాషలో మాట్లాడితే అదే భాషలో స్వచ్ఛంగా సమాధానం ఇవ్వు. "
         "Hindi client కి పూర్తి Hindi (Devanagari) లోనే — Telugu పదాలు కలపకు. Telugu client కి Telugu లోనే.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
-        "నీవు voice notes వినగలవు  మరియు ప్రతి సమాధానం voice లో కూడా పంపుతావు 🔊.\n\n"
+        "నీవు voice notes వినగలవు  మరియు ప్రతి సమాధానం voice లో కూడా పంపుతావు .\n\n"
         "సంభాషణ దశలు:\n"
         "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
@@ -250,7 +249,7 @@ def build_system():
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "   " + CONTACTS_LINE + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా: శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp 📱 8074915644.\n\n"
+        "6. చివరగా: శివ గారిని సంప్రదించండి  8500701521; Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
         "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/హల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
@@ -368,6 +367,7 @@ def detect_lang(text):
 
 def azure_tts(text, lang):
     if not AZURE_SPEECH_KEY:
+        print("⚠️ Azure key not set!")
         return None
     voice_map = {"te": "te-IN-ShrutiNeural", "hi": "hi-IN-SwaraNeural", "en": "en-IN-NeerjaNeural"}
     lang_map = {"te": "te-IN", "hi": "hi-IN", "en": "en-IN"}
@@ -398,10 +398,13 @@ def azure_tts(text, lang):
         with urllib.request.urlopen(tts_req, timeout=60) as res:
             audio_data = res.read()
         if len(audio_data) > 1000:
-            print(f"Azure TTS success: {voice_map[lang]}, {len(audio_data)} bytes")
+            print(f"✅ Azure TTS success: {voice_map[lang]}, {len(audio_data)} bytes")
             return audio_data
+        else:
+            print(f"⚠️ Azure TTS returned small audio: {len(audio_data)} bytes")
+            return None
     except Exception as e:
-        print(f"Azure TTS error: {e}")
+        print(f"❌ Azure TTS error: {e}")
     return None
 
 
@@ -470,30 +473,36 @@ def split_text_for_tts(text, max_chunk=500):
 
 def make_voice_urls(text):
     """Generate voice URLs with proper ordering and paragraph structure"""
+    print(f"\n🎙️  TTS STARTED for text: {text[:100]}...")
     text = clean_text_for_tts(text)
     lang = detect_lang(text)
     
     # Split with proper paragraph ordering
     chunks = split_text_for_tts(text)
     
-    print(f"TTS request: lang={lang}, chunks={len(chunks)}")
+    print(f"📊 TTS request: lang={lang}, chunks={len(chunks)}")
     
     urls = []
     for i, chunk in enumerate(chunks):
         if not chunk.strip():
+            print(f"⚠️ Chunk {i} is empty, skipping")
             continue
             
+        print(f"🔊 Generating voice for chunk {i+1}/{len(chunks)}...")
         audio = azure_tts(chunk, lang)
         if not audio:
-            print(f"Azure TTS failed for chunk {i}, skipping")
+            print(f"❌ Azure TTS failed for chunk {i}, skipping")
             continue
             
         uid = uuid.uuid4().hex
         audio_store[uid] = (audio, "audio/mpeg")
         stats["voice_out"] += 1
         stats["tts_engine"] = "azure"
-        urls.append(f"{BASE_URL}/audio/{uid}")
+        url = f"{BASE_URL}/audio/{uid}"
+        urls.append(url)
+        print(f"✅ Voice URL {i+1} created: {url[:50]}...")
     
+    print(f"🎯 Total voice URLs generated: {len(urls)}\n")
     return urls
 
 
@@ -596,7 +605,9 @@ async def whatsapp_webhook(
     phone = From.replace("whatsapp:", "")
     text = (Body or "").strip()
     stats["total"] += 1
+    print(f"\n{'='*60}")
     print(f"=== MSG #{stats['total']} from {phone}: media={NumMedia}, text={text[:50]} ===")
+    print(f"{'='*60}")
 
     if phone in opted_out or text.lower() in ("stop", "unsubscribe"):
         opted_out.add(phone)
@@ -633,14 +644,25 @@ async def whatsapp_webhook(
             hist.append({"role": "user", "text": f"(voice) {transcript or 'voice note'}"})
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
+            
+            # Send text first
             send(phone, reply_text)
-            for url in make_voice_urls(reply_text):
-                send(phone, None, media_url=url)
-                log_chat("OUT", phone, " (voice reply)")
+            
+            # Then send voice notes
+            print("🎙️ Generating voice notes for reply...")
+            voice_urls = make_voice_urls(reply_text)
+            if voice_urls:
+                for url in voice_urls:
+                    send(phone, None, media_url=url)
+                    log_chat("OUT", phone, "🔊 (voice reply)")
+            else:
+                print("️ No voice URLs generated!")
         else:
             send(phone, FALLBACK)
-            for url in make_voice_urls(FALLBACK):
-                send(phone, None, media_url=url)
+            voice_urls = make_voice_urls(FALLBACK)
+            if voice_urls:
+                for url in voice_urls:
+                    send(phone, None, media_url=url)
         return Response(str(MessagingResponse()), media_type="text/xml")
 
     log_chat("IN", phone, text)
@@ -648,8 +670,14 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    for url in make_voice_urls(final):
-        send(phone, None, media_url=url)
-        log_chat("OUT", phone, "🔊 (voice reply)")
+    # Always send voice notes after text
+    print("🎙️ Generating voice notes for text reply...")
+    voice_urls = make_voice_urls(final)
+    if voice_urls:
+        for url in voice_urls:
+            send(phone, None, media_url=url)
+            log_chat("OUT", phone, "🔊 (voice reply)")
+    else:
+        print("⚠️ No voice URLs generated for text reply!")
 
     return Response(str(MessagingResponse()), media_type="text/xml")
