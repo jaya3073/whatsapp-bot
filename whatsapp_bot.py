@@ -36,12 +36,48 @@ PROPERTIES_SHEET_URL = os.getenv("PROPERTIES_SHEET_URL", "")
 YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
+import edge_tts
+import asyncio
+import os
 
+async def generate_voice_note(text, lang="te-IN", output_path="voice_output.mp3"):
+    """Generate voice note using edge-tts (free, no API key)"""
+    try:
+        # Telugu voice
+        if lang == "te":
+            voice = "te-IN-MohanNeural"  # Telugu male voice
+        elif lang == "en":
+            voice = "en-IN-NeerjaNeural"  # English female voice
+        else:
+            voice = "te-IN-MohanNeural"
+
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(output_path)
+        return output_path
+    except Exception as e:
+        print(f"Voice generation error: {e}")
+        return None
 CONTACTS_LINE = (
     " OLX links WhatsApp లో open అవ్వాలంటే ఈ రెండు నంబర్లు మీ phone contacts లో save చేసుకోండి: "
     "8500701521, 8074915644 ✅"
 )
+async def make_voice_uris(final):
+    voice_urls = []
+    chunks = split_text(final, max_length=400)  # WhatsApp voice limit
 
+    for i, chunk in enumerate(chunks):
+        output_file = f"voice_chunk_{i}.mp3"
+
+        # edge-tts use చేయండి
+        audio = await generate_voice_note(chunk, lang="te", output_path=output_file)
+
+        if audio and os.path.exists(audio):
+            # WhatsApp Media upload చేయండి
+            media_url = await upload_media_to_whatsapp(audio)
+            voice_urls.append(media_url)
+            os.remove(audio)  # cleanup
+
+    return voice_urls
 opted_out = set()
 sessions = {}
 _cache = {}
@@ -614,7 +650,7 @@ def add_audio_to_store(text, lang="te"):
             continue
             
         # Try Azure first
-        audio = azure_tts_simple(chunk, lang)
+         audio = await generate_voice_note(chunk, lang="te")
         
         # Fallback to gTTS
         if not audio:
