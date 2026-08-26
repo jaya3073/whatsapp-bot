@@ -365,46 +365,57 @@ def detect_lang(text):
     return "en"
 
 
-def azure_tts_simple(text, lang):
-    """Simple Azure TTS without SSML to avoid 400 errors"""
-    if not AZURE_SPEECH_KEY:
-        print("⚠️ Azure key not set!")
-        return None
+def make_voice_urls(text):
+    """Generate voice URLs with Azure primary + gTTS fallback"""
+    print(f"\n🎙️  TTS STARTED for text: {text[:100]}...")
+    text = clean_text_for_tts(text)
+    lang = detect_lang(text)
+    chunks = split_text_for_tts(text)
+    print(f"📊 TTS request: lang={lang}, chunks={len(chunks)}")
     
-    voice_map = {"te": "te-IN-ShrutiNeural", "hi": "hi-IN-SwaraNeural", "en": "en-IN-NeerjaNeural"}
-    
-    try:
-        token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
-        token_req = urllib.request.Request(
-            token_url, data=b"",
-            headers={"Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY, "Content-Length": "0"},
-            method="POST",
-        )
-        with urllib.request.urlopen(token_req, timeout=10) as res:
-            token = res.read().decode()
+    urls = []
+    for i, chunk in enumerate(chunks):
+        if not chunk.strip():
+            print(f"⚠️ Chunk {i} is empty, skipping")
+            continue
+            
+        print(f" Generating voice for chunk {i+1}/{len(chunks)}...")
         
-        tts_req = urllib.request.Request(
-            f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
-            data=text.encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "text/plain",
-                "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
-                "User-Agent": "ShivaBot",
-            },
-            method="POST",
-        )
-        with urllib.request.urlopen(tts_req, timeout=60) as res:
-            audio_data = res.read()
-        if len(audio_data) > 1000:
-            print(f"✅ Azure TTS success: {voice_map[lang]}, {len(audio_data)} bytes")
-            return audio_data
-        else:
-            print(f"⚠️ Azure TTS returned small audio: {len(audio_data)} bytes")
-            return None
-    except Exception as e:
-        print(f"❌ Azure TTS error: {e}")
-    return None
+        # Try Azure first (with retry)
+        audio = None
+        for attempt in range(2):
+            audio = azure_tts_simple(chunk, lang)
+            if audio:
+                break
+            print(f"⚠️ Azure attempt {attempt+1} failed, retrying...")
+            time.sleep(1)
+        
+        # Fallback to gTTS only if both Azure attempts fail
+        if not audio:
+            print(f"⚠️ Both Azure attempts failed, trying gTTS fallback...")
+            audio = gtts_fallback(chunk, lang)
+        
+        if not audio:
+            print(f"❌ Both Azure and gTTS failed for chunk {i}, skipping")
+            continue
+            
+        uid = uuid.uuid4().hex
+        audio_store[uid] = {
+            'data': audio,
+            'mime': "audio/mpeg",
+            'created_at': time.time(),
+            'text': chunk[:50] + "..."
+        }
+        
+        url = f"{BASE_URL}/audio/{uid}"
+        urls.append(url)
+        print(f"✅ Voice URL {i+1} created: {url}")
+        print(f"   Audio size: {len(audio)} bytes")
+        print(f"   Stored in audio_store: {uid}")
+    
+    print(f"🎯 Total voice URLs generated: {len(urls)}")
+    print(f"   URLs: {urls}\n")
+    return urls
 
 
 def gtts_fallback(text, lang):
