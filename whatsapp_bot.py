@@ -420,7 +420,8 @@ def make_voice_urls(text):
         # Try Azure first (with retry)
         audio = None
         for attempt in range(2):
-            audio = azure_tts_simple(chunk, lang)
+            
+audio = await generate_voice_note(chunk, lang="te")
             if audio:
                 break
             print(f"⚠️ Azure attempt {attempt+1} failed, retrying...")
