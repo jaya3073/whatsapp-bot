@@ -72,7 +72,7 @@ def push_to_sheet(row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=10)
+        urllib.request.urlopen(req, timeout=15)  # Increased timeout
     except Exception as e:
         print("Sheet error:", e)
 
@@ -128,7 +128,7 @@ def append_row(sheet_url, cache_key, row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=15)
+        urllib.request.urlopen(req, timeout=20)  # Increased timeout
         _cache.pop(cache_key, None)
         return True
     except Exception as e:
@@ -148,7 +148,7 @@ def handle_owner_command(phone, text):
     if text.lower().startswith("addyt"):
         if len(parts) >= 3:
             ok = append_row(YOUTUBE_SHEET_URL, "yt", [parts[1], parts[2]])
-            send(phone, "✅ కొత్త YouTube video add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else " Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
+            send(phone, "✅ కొత్త YouTube video add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else "❌ Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
         else:
             send(phone, "ఫార్మాట్: ADDYT | title | link")
         return True
@@ -180,7 +180,7 @@ def fetch_df(key, url, max_age=120):
         return _cache[key][1]
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=15) as res:
+        with urllib.request.urlopen(req, timeout=20) as res:  # Increased timeout
             df = pd.read_csv(io.StringIO(res.read().decode("utf-8")))
         _cache[key] = (now, df)
         return df
@@ -262,17 +262,27 @@ def build_system():
     )
 
 
-def _call_gemini(payload):
+def _call_gemini(payload, max_retries=3):
+    """Call Gemini API with retry logic"""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as res:
-        data = json.loads(res.read().decode("utf-8"))
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    
+    for attempt in range(max_retries):
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=45) as res:
+                data = json.loads(res.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            print(f"Gemini attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)  # Exponential backoff
+            else:
+                raise
 
 
 def download_twilio_media(url):
@@ -348,12 +358,14 @@ def detect_lang(text):
     return "en"
 
 
-def azure_tts(text, lang):
+def azure_tts_simple(text, lang):
+    """Simple Azure TTS without SSML to avoid 400 errors"""
     if not AZURE_SPEECH_KEY:
         print("⚠️ Azure key not set!")
         return None
+    
     voice_map = {"te": "te-IN-ShrutiNeural", "hi": "hi-IN-SwaraNeural", "en": "en-IN-NeerjaNeural"}
-    lang_map = {"te": "te-IN", "hi": "hi-IN", "en": "en-IN"}
+    
     try:
         token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
         token_req = urllib.request.Request(
@@ -363,16 +375,14 @@ def azure_tts(text, lang):
         )
         with urllib.request.urlopen(token_req, timeout=10) as res:
             token = res.read().decode()
-        ssml = (
-            f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{lang_map[lang]}'>"
-            f"<voice name='{voice_map[lang]}'><prosody rate='+17%'>{text}</prosody></voice></speak>"
-        )
+        
+        # Simple text-to-speech request without SSML
         tts_req = urllib.request.Request(
             f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
-            data=ssml.encode("utf-8"),
+            data=text.encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {token}",
-                "Content-Type": "application/ssml+xml",
+                "Content-Type": "text/plain",
                 "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
                 "User-Agent": "ShivaBot",
             },
@@ -470,8 +480,8 @@ def make_voice_urls(text):
             
         print(f"🔊 Generating voice for chunk {i+1}/{len(chunks)}...")
         
-        # Try Azure first
-        audio = azure_tts(chunk, lang)
+        # Try Azure first (simple version)
+        audio = azure_tts_simple(chunk, lang)
         
         # Fallback to gTTS if Azure fails
         if not audio:
@@ -619,7 +629,7 @@ async def whatsapp_webhook(
             print(f"Voice transcript: {(transcript or 'empty')[:80]}")
         except Exception as e:
             print(f"Voice note error: {e}")
-        log_chat("IN", phone, f" {transcript or '(voice note)'}")
+        log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
         if reply_text:
             hist = sessions.get(phone, [])
             hist.append({"role": "user", "text": f"(voice) {transcript or 'voice note'}"})
@@ -632,9 +642,9 @@ async def whatsapp_webhook(
             if voice_urls:
                 for url in voice_urls:
                     send(phone, None, media_url=url)
-                    log_chat("OUT", phone, "🔊 (voice reply)")
+                    log_chat("OUT", phone, " (voice reply)")
             else:
-                print("️ No voice URLs generated!")
+                print("⚠️ No voice URLs generated!")
         else:
             send(phone, FALLBACK)
             voice_urls = make_voice_urls(FALLBACK)
@@ -648,7 +658,7 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    print("🎙️ Generating voice notes for text reply...")
+    print("️ Generating voice notes for text reply...")
     voice_urls = make_voice_urls(final)
     if voice_urls:
         for url in voice_urls:
