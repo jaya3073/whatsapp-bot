@@ -50,7 +50,7 @@ async def generate_voice_note(text, lang="te-IN", output_path="voice_output.mp3"
             voice = "en-IN-NeerjaNeural"  # English female voice
         else:
             voice = "te-IN-MohanNeural"
-
+        
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(output_path)
         return output_path
@@ -533,7 +533,7 @@ def make_voice_urls(text):
             
         print(f" Generating voice for chunk {i+1}/{len(chunks)}...")
         
-        audio = azure_tts_simple(chunk, lang)
+        audio = await generate_voice_note(chunk, lang="te", output_path=output_file)
         
         if not audio:
             print(f"⚠️ Azure failed, trying gTTS fallback...")
