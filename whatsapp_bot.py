@@ -6,6 +6,7 @@ import time
 import uuid
 import base64
 import urllib.request
+import traceback
 import pandas as pd
 import asyncio
 import edge_tts
@@ -81,8 +82,8 @@ async def generate_voice_note_bytes(text: str, lang: str = "te") -> bytes:
         os.remove(temp_file)
         return audio_bytes
         
-    except Exception as e:
-        print(f"Edge-TTS Voice generation error: {e}")
+      except Exception as e:
+        print(f" gTTS error: {e}")
         return None
 
 # ===========================
@@ -358,10 +359,10 @@ def gtts_fallback(text, lang):
             audio_buffer.seek(0)
             all_audio += audio_buffer.getvalue()
         return all_audio
-    except Exception as e:
-        print(f" gTTS error: {e}")
+       except Exception as e:
+        print(f"❌ gTTS error: {type(e).__name__}: {e}")
+        traceback.print_exc()
         return None
-
 # ===========================
 # FIXED ASYNC VOICE URL GENERATOR
 # ===========================
@@ -372,7 +373,11 @@ async def make_voice_urls(text: str):
     lang = detect_lang(text)
     chunks = split_text_for_tts(text)
     print(f"📊 TTS request: lang={lang}, chunks={len(chunks)}")
-    
+   async def send_voice_in_background(phone: str, text: str):
+    voice_urls = await make_voice_urls(text)
+    for url in voice_urls:
+        send(phone, None, media_url=url)
+        log_chat("OUT", phone, "🎤 (voice reply)") 
     urls = []
     for i, chunk in enumerate(chunks):
         if not chunk.strip():
@@ -388,8 +393,12 @@ async def make_voice_urls(text: str):
             print(f"⚠️ edge-tts failed, trying gTTS fallback...")
             audio_bytes = gtts_fallback(chunk, lang)
         
-        if not audio_bytes:
+              if not audio_bytes:
             print(f"❌ Both TTS engines failed for chunk {i}, skipping")
+            try:
+                send(OWNER_WHATSAPP, f"⚠️ Voice TTS fail అయింది (chunk {i}). Text reply మాత్రమే వెళ్ళింది.")
+            except Exception:
+                pass
             continue
             
         uid = uuid.uuid4().hex
@@ -555,8 +564,11 @@ def get_audio(uid: str):
     
     return Response(content=data, media_type=mime)
 
+from fastapi import BackgroundTasks
+
 @app.post("/whatsapp")
 async def whatsapp_webhook(
+    background_tasks: BackgroundTasks,
     From: str = Form(...),
     Body: str = Form(""),
     NumMedia: str = Form("0"),
@@ -604,34 +616,17 @@ async def whatsapp_webhook(
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
             
-            send(phone, reply_text)
-            print("️ Generating voice notes for reply...")
-            
-            # ✅ FIXED: Added 'await' here because make_voice_urls is now async
-            voice_urls = await make_voice_urls(reply_text)
-            if voice_urls:
-                for url in voice_urls:
-                    send(phone, None, media_url=url)
-                    log_chat("OUT", phone, " (voice reply)")
+                       send(phone, reply_text)
+            background_tasks.add_task(send_voice_in_background, phone, reply_text)
         else:
             send(phone, FALLBACK)
-            voice_urls = await make_voice_urls(FALLBACK)
-            if voice_urls:
-                for url in voice_urls:
-                    send(phone, None, media_url=url)
+            background_tasks.add_task(send_voice_in_background, phone, FALLBACK)
         return Response(str(MessagingResponse()), media_type="text/xml")
-
     log_chat("IN", phone, text)
     reply = ask_gemini(phone, text)
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    print("️ Generating voice notes for text reply...")
-    # ✅ FIXED: Added 'await' here as well
-    voice_urls = await make_voice_urls(final)
-    if voice_urls:
-        for url in voice_urls:
-            send(phone, None, media_url=url)
-            log_chat("OUT", phone, " (voice reply)")
+    background_tasks.add_task(send_voice_in_background, phone, final)
 
     return Response(str(MessagingResponse()), media_type="text/xml")
