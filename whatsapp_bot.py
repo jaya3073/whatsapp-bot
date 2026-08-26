@@ -45,7 +45,7 @@ CONTACTS_LINE = (
 opted_out = set()
 sessions = {}
 _cache = {}
-audio_store = {}
+audio_store = {}  # {uid: {'data': bytes, 'mime': str, 'created_at': float, 'text': str}}
 stats = {"total": 0, "voice_in": 0, "voice_out": 0, "tts_engine": "none"}
 
 FALLBACK = (
@@ -55,8 +55,8 @@ FALLBACK = (
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget?\n\n"
-    " శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp 📱 8074915644\n"
-    f"🛒 OLX Ads: {OLX_LINK}\n"
+    " శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp  8074915644\n"
+    f" OLX Ads: {OLX_LINK}\n"
     f" YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
 )
@@ -72,7 +72,7 @@ def push_to_sheet(row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=15)  # Increased timeout
+        urllib.request.urlopen(req, timeout=15)
     except Exception as e:
         print("Sheet error:", e)
 
@@ -96,11 +96,18 @@ def send(to, body, media_url=None):
             kwargs["body"] = body
         if media_url:
             kwargs["media_url"] = [media_url]
-        client.messages.create(**kwargs)
+            print(f"📤 Sending media_url: {media_url[:80]}...")
+        
+        message = client.messages.create(**kwargs)
+        print(f"✅ Message sent: {message.sid}")
+        
         if body:
             log_chat("OUT", to, body)
     except Exception as e:
-        print("Send error:", e)
+        print(f"❌ Send error: {e}")
+        print(f"   To: {to}")
+        print(f"   Body: {body[:50] if body else 'None'}")
+        print(f"   Media: {media_url[:80] if media_url else 'None'}")
 
 
 def normalize_phone(num):
@@ -128,7 +135,7 @@ def append_row(sheet_url, cache_key, row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=20)  # Increased timeout
+        urllib.request.urlopen(req, timeout=20)
         _cache.pop(cache_key, None)
         return True
     except Exception as e:
@@ -163,7 +170,7 @@ def handle_owner_reply(owner_phone, text):
     else:
         parts = text.split(None, 2)
         if len(parts) < 3:
-            send(owner_phone, "ఫార్మాట్: REPLY <నంబర్> <మెసేజ్>\nఉదా: REPLY 8074915644 రేపు 10కి ఇల్లు చూపిస్తాను 🏠")
+            send(owner_phone, "ఫార్మాట్: REPLY <నంబర్> <మెసేజ్>\nఉదా: REPLY 8074915644 రేపు 10కి ఇల్లు చూపిస్తాను ")
             return
         target = normalize_phone(parts[1])
         msg = parts[2].strip()
@@ -180,7 +187,7 @@ def fetch_df(key, url, max_age=120):
         return _cache[key][1]
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=20) as res:  # Increased timeout
+        with urllib.request.urlopen(req, timeout=20) as res:
             df = pd.read_csv(io.StringIO(res.read().decode("utf-8")))
         _cache[key] = (now, df)
         return df
@@ -250,7 +257,7 @@ def build_system():
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "   " + CONTACTS_LINE + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా: శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp 📱 8074915644.\n\n"
+        "6. చివరగా: శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp  8074915644.\n\n"
         "నియమాలు:\n"
         "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/హల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
@@ -280,7 +287,7 @@ def _call_gemini(payload, max_retries=3):
         except Exception as e:
             print(f"Gemini attempt {attempt + 1} failed: {e}")
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # Exponential backoff
+                time.sleep(2 ** attempt)
             else:
                 raise
 
@@ -376,7 +383,6 @@ def azure_tts_simple(text, lang):
         with urllib.request.urlopen(token_req, timeout=10) as res:
             token = res.read().decode()
         
-        # Simple text-to-speech request without SSML
         tts_req = urllib.request.Request(
             f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
             data=text.encode("utf-8"),
@@ -405,9 +411,8 @@ def gtts_fallback(text, lang):
     """Fallback to gTTS if Azure fails - optimized for speed"""
     try:
         print(f"🔄 Using gTTS fallback for: {text[:50]}...")
-        # Split into smaller chunks for faster processing
         words = text.split()
-        chunk_size = 50  # Smaller chunks for faster generation
+        chunk_size = 50
         chunks = [' '.join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
         
         all_audio = b""
@@ -424,11 +429,11 @@ def gtts_fallback(text, lang):
         print(f"✅ gTTS total success: {len(all_audio)} bytes")
         return all_audio
     except Exception as e:
-        print(f"❌ gTTS error: {e}")
+        print(f" gTTS error: {e}")
         return None
 
 
-def split_text_for_tts(text, max_chunk=400):  # Reduced from 500 to 400 for faster processing
+def split_text_for_tts(text, max_chunk=400):
     text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", "", text)
     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
     
@@ -465,7 +470,7 @@ def split_text_for_tts(text, max_chunk=400):  # Reduced from 500 to 400 for fast
 
 
 def make_voice_urls(text):
-    """Generate voice URLs with Azure primary + gTTS fallback - optimized for speed"""
+    """Generate voice URLs with Azure primary + gTTS fallback"""
     print(f"\n🎙️  TTS STARTED for text: {text[:100]}...")
     text = clean_text_for_tts(text)
     lang = detect_lang(text)
@@ -478,29 +483,34 @@ def make_voice_urls(text):
             print(f"⚠️ Chunk {i} is empty, skipping")
             continue
             
-        print(f"🔊 Generating voice for chunk {i+1}/{len(chunks)}...")
+        print(f" Generating voice for chunk {i+1}/{len(chunks)}...")
         
-        # Try Azure first (simple version)
         audio = azure_tts_simple(chunk, lang)
         
-        # Fallback to gTTS if Azure fails
         if not audio:
             print(f"⚠️ Azure failed, trying gTTS fallback...")
             audio = gtts_fallback(chunk, lang)
         
         if not audio:
-            print(f"❌ Both Azure and gTTS failed for chunk {i}, skipping")
+            print(f" Both Azure and gTTS failed for chunk {i}, skipping")
             continue
             
         uid = uuid.uuid4().hex
-        audio_store[uid] = (audio, "audio/mpeg")
-        stats["voice_out"] += 1
-        stats["tts_engine"] = "azure" if len(audio) > 10000 else "gtts"
+        audio_store[uid] = {
+            'data': audio,
+            'mime': "audio/mpeg",
+            'created_at': time.time(),
+            'text': chunk[:50] + "..."
+        }
+        
         url = f"{BASE_URL}/audio/{uid}"
         urls.append(url)
-        print(f"✅ Voice URL {i+1} created: {url[:50]}...")
+        print(f"✅ Voice URL {i+1} created: {url}")
+        print(f"   Audio size: {len(audio)} bytes")
+        print(f"   Stored in audio_store: {uid}")
     
-    print(f"🎯 Total voice URLs generated: {len(urls)}\n")
+    print(f"🎯 Total voice URLs generated: {len(urls)}")
+    print(f"   URLs: {urls}\n")
     return urls
 
 
@@ -522,7 +532,7 @@ def ask_gemini_audio(phone, audio_bytes, mime):
     instruction = (
         "ఇది client పంపిన voice note. ముందు దాన్ని transcript చేయి, "
         "తర్వాత assistant గా సమాధానం ఇవ్వు. "
-        "voice note ఏ భాషలో ఉంటే సమాధానం కూడా అదే భాషలో స్వచ్ఛంగా ఇవ్వు "
+        "voice note ఏ భాషలో ఉంటే సమాధానం కూడా అదే భాషలో స్వచ్ంగా ఇవ్వు "
         "(Hindi అయితే పూర్తి Hindi Devanagari లోనే, Telugu అయితే Telugu లోనే). "
         "JSON మాత్రమే: {\"transcript\": \"...\", \"reply\": \"...\"}"
     )
@@ -550,7 +560,6 @@ def ask_gemini(phone, user_text):
     system = {"parts": [{"text": build_system()}]}
     reply = None
     try:
-        # Remove tools to avoid 429 errors
         reply = _call_gemini({"systemInstruction": system, "contents": contents})
     except Exception as e:
         print("Gemini error:", e)
@@ -558,6 +567,65 @@ def ask_gemini(phone, user_text):
         hist.append({"role": "model", "text": reply})
         sessions[phone] = hist[-12:]
     return reply
+
+
+# ==================== DELETE FUNCTION ====================
+def cleanup_old_audio(max_age_minutes=30):
+    """Remove audio files older than specified minutes"""
+    global audio_store
+    now = time.time()
+    old_uids = []
+    
+    for uid in list(audio_store.keys()):
+        item = audio_store[uid]
+        if 'created_at' in item:
+            created_time = item['created_at']
+            if (now - created_time) > (max_age_minutes * 60):
+                old_uids.append(uid)
+    
+    for uid in old_uids:
+        del audio_store[uid]
+        print(f"️ Deleted old audio: {uid}")
+    
+    if old_uids:
+        print(f" Cleaned up {len(old_uids)} old audio files")
+
+
+# ==================== ADD FUNCTION ====================
+def add_audio_to_store(text, lang="te"):
+    """Add new audio to store and return URL"""
+    text = clean_text_for_tts(text)
+    chunks = split_text_for_tts(text)
+    
+    urls = []
+    for i, chunk in enumerate(chunks):
+        if not chunk.strip():
+            continue
+            
+        # Try Azure first
+        audio = azure_tts_simple(chunk, lang)
+        
+        # Fallback to gTTS
+        if not audio:
+            audio = gtts_fallback(chunk, lang)
+        
+        if not audio:
+            print(f"❌ Failed to generate audio for chunk {i}")
+            continue
+            
+        uid = uuid.uuid4().hex
+        audio_store[uid] = {
+            'data': audio,
+            'mime': "audio/mpeg",
+            'created_at': time.time(),
+            'text': chunk[:50] + "..."
+        }
+        
+        url = f"{BASE_URL}/audio/{uid}"
+        urls.append(url)
+        print(f"✅ Added audio: {uid}, size: {len(audio)} bytes")
+    
+    return urls
 
 
 @app.get("/")
@@ -577,12 +645,42 @@ def debug():
     }
 
 
+@app.get("/debug/audio")
+def debug_audio():
+    """Check current audio store status"""
+    total_size = sum(len(item['data']) for item in audio_store.values())
+    oldest = min((item.get('created_at', 0) for item in audio_store.values()), default=0)
+    
+    return {
+        "total_files": len(audio_store),
+        "total_size_mb": round(total_size / (1024 * 1024), 2),
+        "oldest_file_age_minutes": round((time.time() - oldest) / 60, 1) if oldest else 0,
+        "recent_files": list(audio_store.keys())[-5:]
+    }
+
+
 @app.get("/audio/{uid}")
 def get_audio(uid: str):
     item = audio_store.get(uid)
     if not item:
-        return Response(status_code=404)
-    data, mime = item
+        print(f"❌ Audio not found: {uid}")
+        print(f"   Available audio files: {list(audio_store.keys())[:5]}")
+        return Response(
+            status_code=404, 
+            content=f"Audio not found. Available: {len(audio_store)} files"
+        )
+    
+    data = item['data']
+    mime = item['mime']
+    created_at = item.get('created_at', 0)
+    
+    # Check if audio is too old (1 hour)
+    if time.time() - created_at > 3600:
+        print(f"️ Audio expired: {uid}")
+        del audio_store[uid]
+        return Response(status_code=410, content="Audio expired")
+    
+    print(f"✅ Serving audio: {uid}, size: {len(data)} bytes")
     return Response(content=data, media_type=mime)
 
 
@@ -637,7 +735,7 @@ async def whatsapp_webhook(
             sessions[phone] = hist[-12:]
             
             send(phone, reply_text)
-            print("🎙️ Generating voice notes for reply...")
+            print("️ Generating voice notes for reply...")
             voice_urls = make_voice_urls(reply_text)
             if voice_urls:
                 for url in voice_urls:
@@ -663,7 +761,7 @@ async def whatsapp_webhook(
     if voice_urls:
         for url in voice_urls:
             send(phone, None, media_url=url)
-            log_chat("OUT", phone, "🔊 (voice reply)")
+            log_chat("OUT", phone, " (voice reply)")
     else:
         print("⚠️ No voice URLs generated for text reply!")
 
