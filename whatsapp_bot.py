@@ -148,7 +148,7 @@ def handle_owner_command(phone, text):
     if text.lower().startswith("addyt"):
         if len(parts) >= 3:
             ok = append_row(YOUTUBE_SHEET_URL, "yt", [parts[1], parts[2]])
-            send(phone, "✅ కొత్త YouTube video add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else "❌ Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
+            send(phone, "✅ కొత్త YouTube video add అయింది! (2 నిమిషాల్లో clients కి కనిపిస్తుంది)" if ok else " Add కాలేదు — SHEET_WRITE_URL env check చేయండి")
         else:
             send(phone, "ఫార్మాట్: ADDYT | title | link")
         return True
@@ -236,7 +236,8 @@ def build_system():
         "Telugu, English, Tanglish, Hindi — client ఏ భాషలో మాట్లాడితే అదే భాషలో స్వచ్ఛంగా సమాధానం ఇవ్వు. "
         "Hindi client కి పూర్తి Hindi (Devanagari) లోనే — Telugu పదాలు కలపకు. Telugu client కి Telugu లోనే.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
-        "నీవు voice notes వినగలవు  మరియు ప్రతి సమాధానం voice లో కూడా పంపుతావు .\n\n"
+        "నీవు voice notes వినగలవు మరియు ప్రతి సమాధానం voice లో కూడా పంపుతావు.\n"
+        "**ముఖ్యం: మీరు type చేయకుండా నాతో voice note ద్వారా కూడా సంభాషించవచ్చు!**\n\n"
         "సంభాషణ దశలు:\n"
         "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
@@ -391,21 +392,33 @@ def azure_tts(text, lang):
 
 
 def gtts_fallback(text, lang):
-    """Fallback to gTTS if Azure fails"""
+    """Fallback to gTTS if Azure fails - optimized for speed"""
     try:
         print(f"🔄 Using gTTS fallback for: {text[:50]}...")
-        tts = gTTS(text=text, lang=lang, slow=False)
-        audio_buffer = io.BytesIO()
-        tts.write_to_fp(audio_buffer)
-        audio_buffer.seek(0)
-        print(f"✅ gTTS success: {len(audio_buffer.getvalue())} bytes")
-        return audio_buffer.getvalue()
+        # Split into smaller chunks for faster processing
+        words = text.split()
+        chunk_size = 50  # Smaller chunks for faster generation
+        chunks = [' '.join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
+        
+        all_audio = b""
+        for i, chunk in enumerate(chunks):
+            if not chunk.strip():
+                continue
+            tts = gTTS(text=chunk, lang=lang, slow=False)
+            audio_buffer = io.BytesIO()
+            tts.write_to_fp(audio_buffer)
+            audio_buffer.seek(0)
+            all_audio += audio_buffer.getvalue()
+            print(f"✅ gTTS chunk {i+1}/{len(chunks)} success: {len(audio_buffer.getvalue())} bytes")
+        
+        print(f"✅ gTTS total success: {len(all_audio)} bytes")
+        return all_audio
     except Exception as e:
         print(f"❌ gTTS error: {e}")
         return None
 
 
-def split_text_for_tts(text, max_chunk=500):
+def split_text_for_tts(text, max_chunk=400):  # Reduced from 500 to 400 for faster processing
     text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", "", text)
     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
     
@@ -442,7 +455,7 @@ def split_text_for_tts(text, max_chunk=500):
 
 
 def make_voice_urls(text):
-    """Generate voice URLs with Azure primary + gTTS fallback"""
+    """Generate voice URLs with Azure primary + gTTS fallback - optimized for speed"""
     print(f"\n🎙️  TTS STARTED for text: {text[:100]}...")
     text = clean_text_for_tts(text)
     lang = detect_lang(text)
@@ -527,17 +540,10 @@ def ask_gemini(phone, user_text):
     system = {"parts": [{"text": build_system()}]}
     reply = None
     try:
-        reply = _call_gemini({
-            "systemInstruction": system,
-            "contents": contents,
-            "tools": [{"google_search": {}}],
-        })
+        # Remove tools to avoid 429 errors
+        reply = _call_gemini({"systemInstruction": system, "contents": contents})
     except Exception as e:
-        print("Gemini tools error:", e)
-        try:
-            reply = _call_gemini({"systemInstruction": system, "contents": contents})
-        except Exception as e2:
-            print("Gemini error:", e2)
+        print("Gemini error:", e)
     if reply:
         hist.append({"role": "model", "text": reply})
         sessions[phone] = hist[-12:]
@@ -613,7 +619,7 @@ async def whatsapp_webhook(
             print(f"Voice transcript: {(transcript or 'empty')[:80]}")
         except Exception as e:
             print(f"Voice note error: {e}")
-        log_chat("IN", phone, f"🎤 {transcript or '(voice note)'}")
+        log_chat("IN", phone, f" {transcript or '(voice note)'}")
         if reply_text:
             hist = sessions.get(phone, [])
             hist.append({"role": "user", "text": f"(voice) {transcript or 'voice note'}"})
@@ -628,7 +634,7 @@ async def whatsapp_webhook(
                     send(phone, None, media_url=url)
                     log_chat("OUT", phone, "🔊 (voice reply)")
             else:
-                print("⚠️ No voice URLs generated!")
+                print("️ No voice URLs generated!")
         else:
             send(phone, FALLBACK)
             voice_urls = make_voice_urls(FALLBACK)
