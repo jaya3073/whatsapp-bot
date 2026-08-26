@@ -37,9 +37,10 @@ YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
+# FIXED: Correct order with 8500701521 first
 CONTACTS_LINE = (
-    "📌 OLX links WhatsApp లో open అవ్వాలంటే ఈ రెండు నంబర్లు మీ phone contacts లో save చేసుకోండి: "
-    "8074915644, 8500701521 ✅"
+    " OLX links WhatsApp లో open అవ్వాలంటే ఈ రెండు నంబర్లు మీ phone contacts లో save చేసుకోండి: "
+    "8500701521, 8074915644 ✅"
 )
 
 opted_out = set()
@@ -55,8 +56,7 @@ FALLBACK = (
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget?\n\n"
-    " శివ గారు (కాల్ & WhatsApp Chat Bot): 8500701521\n"
-    "📱 Direct WhatsApp: 8074915644\n"
+    " శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp 📱 8074915644\n"
     f"🛒 OLX Ads: {OLX_LINK}\n"
     f" YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
@@ -233,7 +233,7 @@ def youtube_context():
 
 def build_system():
     return (
-        "నీవు 'శివ హస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
+        "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
         "Telugu, English, Tanglish, Hindi — client ఏ భాషలో మాట్లాడితే అదే భాషలో స్వచ్ఛంగా సమాధానం ఇవ్వు. "
         "Hindi client కి పూర్తి Hindi (Devanagari) లోనే — Telugu పదాలు కలపకు. Telugu client కి Telugu లోనే.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
@@ -250,7 +250,7 @@ def build_system():
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "   " + CONTACTS_LINE + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా: శివ గారికి కాల్ చేయండి 📞 8500701521 (WhatsApp Chat Bot); Direct WhatsApp 📱 8074915644.\n\n"
+        "6. చివరగా: శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
         "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/హల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
@@ -382,7 +382,7 @@ def azure_tts(text, lang):
             token = res.read().decode()
         ssml = (
             f"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='{lang_map[lang]}'>"
-            f"<voice name='{voice_map[lang]}'><prosody rate='+18%'>{text}</prosody></voice></speak>"
+            f"<voice name='{voice_map[lang]}'><prosody rate='+17%'>{text}</prosody></voice></speak>"
         )
         tts_req = urllib.request.Request(
             f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
@@ -406,45 +406,61 @@ def azure_tts(text, lang):
 
 
 def split_text_for_tts(text, max_chunk=500):
-    """Split text into chunks with fees info first"""
+    """Split text into chunks with proper ordering and paragraph gaps"""
     
     # Remove phone numbers
     text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", "", text)
     
-    # Separate fees/service info from other content
-    fees_content = []
-    other_content = []
+    # Split by paragraphs (double newlines)
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
     
-    sentences = re.split(r'[.!?]+', text)
+    # Categorize paragraphs
+    intro_paragraphs = []
+    house_details = []
+    fees_info = []
+    contact_info = []
+    other_paragraphs = []
     
-    for sentence in sentences:
-        sentence = sentence.strip()
-        if not sentence:
-            continue
+    for para in paragraphs:
+        para_lower = para.lower()
         
-        # Check if it's fees/service related
-        if any(keyword in sentence.lower() for keyword in ['కమిషన్', 'fee', 'visiting', 'సర్వీస్', 'validity']):
-            fees_content.append(sentence)
+        # Check for introductory content
+        if any(keyword in para_lower for keyword in ['నమస్తే', 'hello', 'hi', 'welcome']):
+            intro_paragraphs.append(para)
+        # Check for fees/service info
+        elif any(keyword in para_lower for keyword in ['కమిషన్', 'fee', 'visiting', 'సర్వీస్', 'validity']):
+            fees_info.append(para)
+        # Check for contact info
+        elif any(keyword in para_lower for keyword in ['సంప్రదించండి', 'contact', 'whatsapp', 'chat bot', 'direct']):
+            contact_info.append(para)
+        # Check for house details
+        elif any(keyword in para_lower for keyword in ['ఇల్లు', 'house', 'budget', 'BHK', 'area', 'option']):
+            house_details.append(para)
         else:
-            other_content.append(sentence)
+            other_paragraphs.append(para)
     
-    # Combine: fees first, then others
-    prioritized = fees_content + other_content
+    # Combine in correct order: Intro -> House Details -> Fees Info -> Contact Info -> Other
+    ordered_paragraphs = intro_paragraphs + house_details + fees_info + contact_info + other_paragraphs
     
-    # Split into chunks
+    # Create chunks with paragraph gaps
     chunks = []
     current_chunk = ""
     
-    for sentence in prioritized:
-        if len(current_chunk) + len(sentence) + 1 <= max_chunk:
-            if current_chunk:
-                current_chunk += " " + sentence
-            else:
-                current_chunk = sentence
+    for para in ordered_paragraphs:
+        # Add gap between paragraphs
+        if current_chunk and para:
+            separator = ".  "  # Add space between sentences
+        else:
+            separator = ""
+            
+        combined = current_chunk + separator + para if current_chunk else para
+        
+        if len(combined) <= max_chunk:
+            current_chunk = combined
         else:
             if current_chunk:
                 chunks.append(current_chunk)
-            current_chunk = sentence
+            current_chunk = para
     
     if current_chunk:
         chunks.append(current_chunk)
@@ -453,11 +469,11 @@ def split_text_for_tts(text, max_chunk=500):
 
 
 def make_voice_urls(text):
-    """Generate voice URLs with proper ordering"""
+    """Generate voice URLs with proper ordering and paragraph structure"""
     text = clean_text_for_tts(text)
     lang = detect_lang(text)
     
-    # Split with fees info first
+    # Split with proper paragraph ordering
     chunks = split_text_for_tts(text)
     
     print(f"TTS request: lang={lang}, chunks={len(chunks)}")
@@ -620,7 +636,7 @@ async def whatsapp_webhook(
             send(phone, reply_text)
             for url in make_voice_urls(reply_text):
                 send(phone, None, media_url=url)
-                log_chat("OUT", phone, "🔊 (voice reply)")
+                log_chat("OUT", phone, " (voice reply)")
         else:
             send(phone, FALLBACK)
             for url in make_voice_urls(FALLBACK):
