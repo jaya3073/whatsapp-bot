@@ -232,7 +232,7 @@ def youtube_context():
 
 def build_system():
     return (
-        "నీవు 'శివ హస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
+        "నీవు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' (హైదరాబాద్) WhatsApp AI assistant వు. "
         "Telugu, English, Tanglish, Hindi — client ఏ భాషలో మాట్లాడితే అదే భాషలో స్వచ్ఛంగా సమాధానం ఇవ్వు. "
         "Hindi client కి పూర్తి Hindi (Devanagari) లోనే — Telugu పదాలు కలపకు. Telugu client కి Telugu లోనే.\n"
         "నీకు గత సంభాషణ జ్ఞాపకం ఉంటుంది — client ఇంతకు ముందు చెప్పిన వివరాలు గుర్తుంచుకుని ముందుకు సాగి; మళ్ళీ అదే ప్రశ్న అడగవద్దు.\n"
@@ -249,7 +249,7 @@ def build_system():
         "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "   " + CONTACTS_LINE + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా: శివ గారిని సంప్రదించండి  8500701521; Direct WhatsApp 📱 8074915644.\n\n"
+        "6. చివరగా: శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp 📱 8074915644.\n\n"
         "నియమాలు:\n"
         "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/హల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
@@ -284,13 +284,10 @@ def download_twilio_media(url):
 def number_to_words(num):
     """Convert numbers to English words"""
     num = int(num)
-    
     if num == 0:
         return "zero"
-    
     ones = ["", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
-    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", 
-             "seventeen", "eighteen", "nineteen"]
+    teens = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
     tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
     
     def convert(n):
@@ -306,12 +303,10 @@ def number_to_words(num):
             return convert(n//1000) + " thousand" + (" " + convert(n%1000) if n%1000 != 0 else "")
         else:
             return convert(n//1000000) + " million" + (" " + convert(n%1000000) if n%1000000 != 0 else "")
-    
     return convert(num)
 
 
 def clean_text_for_tts(text):
-    # Remove emojis first
     emoji_pattern = re.compile(
         "["
         u"\U0001F600-\U0001F64F"
@@ -323,22 +318,13 @@ def clean_text_for_tts(text):
         u"\U00002000-\U0000206F"
         "]+", flags=re.UNICODE)
     text = emoji_pattern.sub('', text)
-    
-    # Remove special characters
     text = re.sub(r"[*_#>`•]", "", text)
-    
-    # Remove URLs
     text = re.sub(r"https?://\S+", " ", text)
-    
-    # Remove unwanted words
     text = re.sub(r'Indian Rupees?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\bGST\b', '', text, flags=re.IGNORECASE)
     text = re.sub(r'₹', '', text)
-    
-    # SKIP phone numbers completely (remove them from TTS)
     text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", " ", text)
     
-    # Convert other numbers to words
     def replace_numbers(match):
         num_str = match.group(0)
         try:
@@ -346,12 +332,8 @@ def clean_text_for_tts(text):
             return number_to_words(num)
         except:
             return num_str
-    
     text = re.sub(r'\d{1,3}(?:,\d{3})*', replace_numbers, text)
-    
-    # Clean up extra spaces
     text = re.sub(r"\s+", " ", text).strip()
-    
     return text
 
 
@@ -408,78 +390,63 @@ def azure_tts(text, lang):
     return None
 
 
+def gtts_fallback(text, lang):
+    """Fallback to gTTS if Azure fails"""
+    try:
+        print(f"🔄 Using gTTS fallback for: {text[:50]}...")
+        tts = gTTS(text=text, lang=lang, slow=False)
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        print(f"✅ gTTS success: {len(audio_buffer.getvalue())} bytes")
+        return audio_buffer.getvalue()
+    except Exception as e:
+        print(f"❌ gTTS error: {e}")
+        return None
+
+
 def split_text_for_tts(text, max_chunk=500):
-    """Split text into chunks with proper ordering and paragraph gaps"""
-    
-    # Remove phone numbers
     text = re.sub(r"(?:\+?91[\s-]?)?[6-9](?:[\s-]?\d){9}", "", text)
-    
-    # Split by paragraphs (double newlines)
     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
     
-    # Categorize paragraphs
-    intro_paragraphs = []
-    house_details = []
-    fees_info = []
-    contact_info = []
-    other_paragraphs = []
+    intro_paragraphs, house_details, fees_info, contact_info, other_paragraphs = [], [], [], [], []
     
     for para in paragraphs:
         para_lower = para.lower()
-        
-        # Check for introductory content
-        if any(keyword in para_lower for keyword in ['నమస్తే', 'hello', 'hi', 'welcome']):
+        if any(kw in para_lower for kw in ['నమస్తే', 'hello', 'hi', 'welcome']):
             intro_paragraphs.append(para)
-        # Check for fees/service info
-        elif any(keyword in para_lower for keyword in ['కమిషన్', 'fee', 'visiting', 'సర్వీస్', 'validity']):
+        elif any(kw in para_lower for kw in ['కమిషన్', 'fee', 'visiting', 'సర్వీస్', 'validity']):
             fees_info.append(para)
-        # Check for contact info
-        elif any(keyword in para_lower for keyword in ['సంప్రదించండి', 'contact', 'whatsapp', 'chat bot', 'direct']):
+        elif any(kw in para_lower for kw in ['సంప్రదించండి', 'contact', 'whatsapp', 'chat bot', 'direct']):
             contact_info.append(para)
-        # Check for house details
-        elif any(keyword in para_lower for keyword in ['ఇల్లు', 'house', 'budget', 'BHK', 'area', 'option']):
+        elif any(kw in para_lower for kw in ['ఇల్లు', 'house', 'budget', 'BHK', 'area', 'option']):
             house_details.append(para)
         else:
             other_paragraphs.append(para)
     
-    # Combine in correct order: Intro -> House Details -> Fees Info -> Contact Info -> Other
     ordered_paragraphs = intro_paragraphs + house_details + fees_info + contact_info + other_paragraphs
-    
-    # Create chunks with paragraph gaps
-    chunks = []
-    current_chunk = ""
+    chunks, current_chunk = [], ""
     
     for para in ordered_paragraphs:
-        # Add gap between paragraphs
-        if current_chunk and para:
-            separator = ".  "  # Add space between sentences
-        else:
-            separator = ""
-            
+        separator = ".  " if current_chunk and para else ""
         combined = current_chunk + separator + para if current_chunk else para
-        
         if len(combined) <= max_chunk:
             current_chunk = combined
         else:
             if current_chunk:
                 chunks.append(current_chunk)
             current_chunk = para
-    
     if current_chunk:
         chunks.append(current_chunk)
-    
     return chunks if chunks else [text]
 
 
 def make_voice_urls(text):
-    """Generate voice URLs with proper ordering and paragraph structure"""
+    """Generate voice URLs with Azure primary + gTTS fallback"""
     print(f"\n🎙️  TTS STARTED for text: {text[:100]}...")
     text = clean_text_for_tts(text)
     lang = detect_lang(text)
-    
-    # Split with proper paragraph ordering
     chunks = split_text_for_tts(text)
-    
     print(f"📊 TTS request: lang={lang}, chunks={len(chunks)}")
     
     urls = []
@@ -489,15 +456,23 @@ def make_voice_urls(text):
             continue
             
         print(f"🔊 Generating voice for chunk {i+1}/{len(chunks)}...")
+        
+        # Try Azure first
         audio = azure_tts(chunk, lang)
+        
+        # Fallback to gTTS if Azure fails
         if not audio:
-            print(f"❌ Azure TTS failed for chunk {i}, skipping")
+            print(f"⚠️ Azure failed, trying gTTS fallback...")
+            audio = gtts_fallback(chunk, lang)
+        
+        if not audio:
+            print(f"❌ Both Azure and gTTS failed for chunk {i}, skipping")
             continue
             
         uid = uuid.uuid4().hex
         audio_store[uid] = (audio, "audio/mpeg")
         stats["voice_out"] += 1
-        stats["tts_engine"] = "azure"
+        stats["tts_engine"] = "azure" if len(audio) > 10000 else "gtts"
         url = f"{BASE_URL}/audio/{uid}"
         urls.append(url)
         print(f"✅ Voice URL {i+1} created: {url[:50]}...")
@@ -645,10 +620,7 @@ async def whatsapp_webhook(
             hist.append({"role": "model", "text": reply_text})
             sessions[phone] = hist[-12:]
             
-            # Send text first
             send(phone, reply_text)
-            
-            # Then send voice notes
             print("🎙️ Generating voice notes for reply...")
             voice_urls = make_voice_urls(reply_text)
             if voice_urls:
@@ -656,7 +628,7 @@ async def whatsapp_webhook(
                     send(phone, None, media_url=url)
                     log_chat("OUT", phone, "🔊 (voice reply)")
             else:
-                print("️ No voice URLs generated!")
+                print("⚠️ No voice URLs generated!")
         else:
             send(phone, FALLBACK)
             voice_urls = make_voice_urls(FALLBACK)
@@ -670,7 +642,6 @@ async def whatsapp_webhook(
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    # Always send voice notes after text
     print("🎙️ Generating voice notes for text reply...")
     voice_urls = make_voice_urls(final)
     if voice_urls:
