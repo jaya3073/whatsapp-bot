@@ -374,10 +374,14 @@ async def make_voice_urls(text: str):
     chunks = split_text_for_tts(text)
     print(f"📊 TTS request: lang={lang}, chunks={len(chunks)}")
    async def send_voice_in_background(phone: str, text: str):
-    voice_urls = await make_voice_urls(text)
-    for url in voice_urls:
-        send(phone, None, media_url=url)
-        log_chat("OUT", phone, "🎤 (voice reply)") 
+    try:
+        voice_urls = await make_voice_urls(text)
+        for url in voice_urls:
+            send(phone, None, media_url=url)
+            log_chat("OUT", phone, "🎤 (voice reply)")
+    except BaseException as e:
+        print(f"❌ Voice background task crashed: {type(e).__name__}: {e}")
+        traceback.print_exc()
     urls = []
     for i, chunk in enumerate(chunks):
         if not chunk.strip():
