@@ -497,6 +497,58 @@ def get_audio(uid: str):
     
     data = item['data']
     mime = item['mime']
+    def azure_tts_simple(text, lang):
+    """Simple Azure TTS with better error handling"""
+    if not AZURE_SPEECH_KEY:
+        print("⚠️ Azure key not set!")
+        return None
+    
+    if not AZURE_SPEECH_REGION:
+        print("⚠️ Azure region not set!")
+        return None
+    
+    voice_map = {"te": "te-IN-ShrutiNeural", "hi": "hi-IN-SwaraNeural", "en": "en-IN-NeerjaNeural"}
+    
+    try:
+        # Get token
+        token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+        token_req = urllib.request.Request(
+            token_url, data=b"",
+            headers={"Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY, "Content-Length": "0"},
+            method="POST",
+        )
+        
+        with urllib.request.urlopen(token_req, timeout=10) as res:
+            token = res.read().decode()
+        
+        # Generate audio
+        tts_req = urllib.request.Request(
+            f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1",
+            data=text.encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "text/plain",
+                "X-Microsoft-OutputFormat": "audio-16khz-128kbitrate-mono-mp3",
+                "User-Agent": "ShivaBot",
+            },
+            method="POST",
+        )
+        
+        with urllib.request.urlopen(tts_req, timeout=60) as res:
+            audio_data = res.read()
+        
+        if len(audio_data) > 1000:
+            print(f"✅ Azure TTS success: {voice_map[lang]}, {len(audio_data)} bytes")
+            return audio_data
+        else:
+            print(f"⚠️ Azure TTS returned small audio: {len(audio_data)} bytes")
+            return None
+            
+    except Exception as e:
+        print(f" Azure TTS error: {e}")
+        print(f"   Region: {AZURE_SPEECH_REGION}")
+        print(f"   Key length: {len(AZURE_SPEECH_KEY) if AZURE_SPEECH_KEY else 0}")
+        return None
     if time.time() - item.get('created_at', 0) > 3600:
         del audio_store[uid]
         return Response(status_code=410, content="Audio expired")
