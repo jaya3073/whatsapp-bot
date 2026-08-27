@@ -1,3 +1,5 @@
+import urllib.request
+import xml.sax.saxutils as saxutils
 import os
 import re
 import io
@@ -343,7 +345,53 @@ def split_text_for_tts(text, max_chunk=400):
             current_chunk = para
     if current_chunk: chunks.append(current_chunk)
     return chunks if chunks else [text]
+def azure_tts_simple(text, lang="te"):
+    """Generate speech using Azure Cognitive Services TTS REST API"""
+    if not AZURE_SPEECH_KEY:
+        print("⚠️ AZURE_SPEECH_KEY not set, skipping Azure TTS")
+        return None
 
+    voice_map = {
+        "te": "te-IN-ShrutiNeural",
+        "hi": "hi-IN-SwaraNeural",
+        "en": "en-IN-NeerjaNeural",
+    }
+    voice = voice_map.get(lang, "te-IN-ShrutiNeural")
+
+    try:
+        token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+        token_req = urllib.request.Request(
+            token_url,
+            data=b"",
+            headers={"Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY},
+            method="POST",
+        )
+        with urllib.request.urlopen(token_req, timeout=15) as res:
+            access_token = res.read().decode("utf-8")
+
+        safe_text = saxutils.escape(text)
+        ssml = (
+            f'<speak version="1.0" xml:lang="en-US">'
+            f'<voice xml:lang="en-US" name="{voice}">{safe_text}</voice>'
+            f'</speak>'
+        )
+        tts_url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+        tts_req = urllib.request.Request(
+            tts_url,
+            data=ssml.encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/ssml+xml",
+                "X-Microsoft-OutputFormat": "audio-16khz-32kbitrate-mono-mp3",
+                "User-Agent": "shiva-house-bot",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(tts_req, timeout=20) as res:
+            return res.read()
+    except Exception as e:
+        print(f"❌ Azure TTS error: {e}")
+        return None
 def gtts_fallback(text, lang):
     try:
         print(f"🔄 Using gTTS fallback for: {text[:50]}...")
