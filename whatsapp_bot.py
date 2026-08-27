@@ -82,8 +82,8 @@ async def generate_voice_note_bytes(text: str, lang: str = "te") -> bytes:
         os.remove(temp_file)
         return audio_bytes
         
-      except Exception as e:
-        print(f" gTTS error: {e}")
+         except Exception as e:
+        print(f"gTTS error: {e}")
         return None
 
 # ===========================
