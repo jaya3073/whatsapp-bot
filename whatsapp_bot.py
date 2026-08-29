@@ -270,7 +270,7 @@ def build_system():
     )
 
 
-def _call_gemini(payload, max_retries=3):
+def _call_gemini(payload, max_retries=2):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     for attempt in range(max_retries):
         try:
@@ -280,7 +280,7 @@ def _call_gemini(payload, max_retries=3):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=45) as res:
+                       with urllib.request.urlopen(req, timeout=20) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception as e:
