@@ -39,8 +39,7 @@ AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
 CONTACTS_LINE = (
-    " OLX links WhatsApp లో open అవ్వాలంటే ఈ రెండు నంబర్లు మీ phone contacts లో save చేసుకోండి: "
-    "8500701521, 8074915644 ✅"
+    "📞/WhatsApp: 8500701521, 8074915644 (OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
 )
 
 opted_out = set()
@@ -56,7 +55,7 @@ FALLBACK = (
     "• ఎంత మంది ఉంటారు?\n"
     "• ఫ్యామిలీనా / బ్యాచిలర్స్?\n"
     "• ఎంత rent budget?\n\n"
-    " శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp  8074915644\n"
+  
     f" OLX Ads: {OLX_LINK}\n"
     f" YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
@@ -250,6 +249,7 @@ def build_system():
         "1. మొదట client పేరు అడుగు, తర్వాత: ఎంత మంది ఉంటారు? ఫ్యామిలీనా బ్యాచిలర్స్? ఎంత rent budget?\n"
         "2. Budget తెలియగానే → వెంటనే ఆ budget లోపు ఉన్న ఉత్తమ ఇళ్లు 3 ని 🔗 links తో పంపు (కింద లిస్ట్ నుంచే).\n"
         "3. ఆ తర్వాత ఫీజు వివరాలు చెప్పు:\n"
+                "- క్లయింట్ పేరుతో greet చేసేటప్పుడు 'శివ హౌస్ రెంటల్ ఏజెన్సీ' తర్వాత, client పేరుకు ముందు ఎప్పుడూ space/విరామం ఉంచు — పేర్లు కలిపి రాయవద్దు.\n"
         "   • ఏజెన్సీ కమిషన్: మొదటి నెల అద్దెపై ₹5,000 మాత్రమే.\n"
         "   • ₹8,000 లోపు అద్దె ఇళ్లకు: కమిషన్ ₹4,000 మాత్రమే.\n"
         "   • 2BHK అడిగితే → కమిషన్ ₹6,000.\n"
@@ -257,9 +257,10 @@ def build_system():
         "   • మా సర్వీస్: మీ బడ్జెట్ లో 3 లేదా 5 ఇళ్లు చూపిస్తాము. ఆ రోజు ఇల్లు set కాకపోతే, ఇల్లు దొరికేవరకు 1 month validity ఉంటుంది ఆ ₹800 కి.\n"
                "4. తర్వాత: మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: " + OLX_LINK + "\n"
         "5. YouTube videos కూడా చూడండి — కానీ కొన్ని ఇళ్లు ఇప్పటికే rented out అయి ఉండవచ్చు: " + YOUTUBE_LINK + "\n"
-        "6. చివరగా, ఒక్కసారి మాత్రమే: శివ గారిని సంప్రదించండి 📞 8500701521; Direct WhatsApp  8074915644. " + CONTACTS_LINE + "\n\n"
+               "6. చివరగా, ఒక్కసారి మాత్రమే: " + CONTACTS_LINE + "\n\n"
         "నియమాలు:\n"
-        "- ఫోన్ నంబర్లు (8500701521, 8074915644) మీ సమాధానం మొత్తంలో ఒక్కసారి మాత్రమే ప్రస్తావించు — చివర్లో ఒక్కసారి, మధ్యలో మళ్ళీ మళ్ళీ చెప్పవద్దు.\n"
+        "- ఫోన్ నంబర్లు మీ సమాధానం మొత్తంలో ఒక్కసారి మాత్రమే — చివర్లో మాత్రమే చెప్పు.\n"
+        "- 'Direct WhatsApp' అనే పదం వాడవద్దు; నంబర్లు మాత్రమే చెప్పు.\n"
         "- ఇళ్ల సిఫార్సులు ఇళ్ల లిస్ట్ నుంచే; internet/హల ఆధారంగా కొత్త ఇళ్లు చెప్పవద్దు.\n"
         "- client video గురించి అడిగితే లేదా ఏరియా చెప్తే YouTube లిస్ట్ లో సరిపడే video link పంపు.\n"
         "- లిస్ట్ లో లేనిది అడిగితే OLX profile చూడమని చెప్పు.\n"
@@ -321,7 +322,7 @@ def number_to_words(num):
             return convert(n//1000000) + " million" + (" " + convert(n%1000000) if n%1000000 != 0 else "")
     return convert(num)
 
-
+from concurrent.futures import ThreadPoolExecutor
 def clean_text_for_tts(text):
     emoji_pattern = re.compile(
         "["
@@ -336,6 +337,8 @@ def clean_text_for_tts(text):
     text = emoji_pattern.sub('', text)
     text = re.sub(r"[*_#>`•]", "", text)
     text = re.sub(r"https?://\S+", " ", text)
+        text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r'^.*\|.*\|.*$', '', text, flags=re.MULTILINE)  # ఇది కొత్త లైన్ — listing rows తీసేస్తుంది
     text = re.sub(r'Indian Rupees?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\bGST\b', '', text, flags=re.IGNORECASE)
     text = re.sub(r'₹', '', text)
@@ -384,7 +387,7 @@ def azure_tts_simple(text, lang="te"):
             headers={"Ocp-Apim-Subscription-Key": AZURE_SPEECH_KEY},
             method="POST",
         )
-        with urllib.request.urlopen(token_req, timeout=15) as res:
+        with urllib.request.urlopen(req, timeout=6) as res:
             access_token = res.read().decode("utf-8")
 
         safe_text = saxutils.escape(text)
@@ -473,50 +476,28 @@ def split_text_for_tts(text, max_chunk=400):
     return chunks if chunks else [text]
 
 
-def make_voice_urls(text):
-    """Generate voice URLs with Azure primary + gTTS fallback"""
-    print(f"\n🎙️  TTS STARTED for text: {text[:100]}...")
-    text = clean_text_for_tts(text)
-    lang = detect_lang(text)
-    chunks = split_text_for_tts(text)
-    print(f"📊 TTS request: lang={lang}, chunks={len(chunks)}")
+    chunks = [c for c in chunks if c.strip()]
+
+    def process_chunk(chunk):
+        audio = azure_tts_simple(chunk, lang)
+        if not audio:
+            audio = gtts_fallback(chunk, lang)
+        return audio
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(executor.map(process_chunk, chunks))
 
     urls = []
-    for i, chunk in enumerate(chunks):
-        if not chunk.strip():
-            print(f"⚠️ Chunk {i} is empty, skipping")
-            continue
-
-        print(f" Generating voice for chunk {i+1}/{len(chunks)}...")
-
-        audio = azure_tts_simple(chunk, lang)
-
+    for audio in results:
         if not audio:
-            print("⚠️ Azure failed, trying gTTS fallback...")
-            audio = gtts_fallback(chunk, lang)
-
-        if not audio:
-            print(f"❌ Both Azure and gTTS failed for chunk {i}, skipping")
             continue
-
         uid = uuid.uuid4().hex
         audio_store[uid] = {
             'data': audio,
             'mime': "audio/mpeg",
             'created_at': time.time(),
-            'text': chunk[:50] + "..."
         }
-
-        url = f"{BASE_URL}/audio/{uid}"
-        urls.append(url)
-        print(f"✅ Voice URL {i+1} created: {url}")
-        print(f"   Audio size: {len(audio)} bytes")
-        print(f"   Stored in audio_store: {uid}")
-
-    print(f"🎯 Total voice URLs generated: {len(urls)}")
-    print(f"   URLs: {urls}\n")
-    return urls
-
+        urls.append(f"{BASE_URL}/audio/{uid}")
 
 def parse_json_reply(raw):
     try:
