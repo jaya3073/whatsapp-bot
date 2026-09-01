@@ -61,7 +61,25 @@ FALLBACK = (
     + CONTACTS_LINE
 )
 
+# Add this before Gemini calls
+import google.generativeai as genai
+from google.api_core import retry, timeout
 
+# Configure Gemini with strict timeouts
+def get_gemini_response(text):
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        
+        # Set strict timeout - max 10 seconds
+        response = model.generate_content(
+            text,
+            request_options={"timeout": 10}  # 10 seconds max
+        )
+        return response.text
+    except Exception as e:
+        print(f"Gemini error: {e}")
+        return None  # Return None instead of retrying
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
@@ -72,7 +90,7 @@ def push_to_sheet(row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=15)
+        urllib.request.urlopen(req, timeout=10)
     except Exception as e:
         print("Sheet error:", e)
 
@@ -135,7 +153,7 @@ def append_row(sheet_url, cache_key, row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=20)
+        urllib.request.urlopen(req, timeout=10)
         _cache.pop(cache_key, None)
         return True
     except Exception as e:
@@ -187,7 +205,7 @@ def fetch_df(key, url, max_age=120):
         return _cache[key][1]
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=20) as res:
+        with urllib.request.urlopen(req, timeout=10) as res:
             df = pd.read_csv(io.StringIO(res.read().decode("utf-8")))
         _cache[key] = (now, df)
         return df
@@ -281,7 +299,7 @@ def _call_gemini(payload, max_retries=2):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-                       with urllib.request.urlopen(req, timeout=20) as res:
+                       with urllib.request.urlopen(req, timeout=10) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception as e:
@@ -295,7 +313,7 @@ def _call_gemini(payload, max_retries=2):
 def download_twilio_media(url):
     auth = base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
     req = urllib.request.Request(url, headers={"Authorization": f"Basic {auth}"})
-    with urllib.request.urlopen(req, timeout=20) as res:
+    with urllib.request.urlopen(req, timeout=10) as res:
         return res.read(), (res.headers.get_content_type() or "audio/mpeg")
 
 
@@ -408,7 +426,7 @@ def azure_tts_simple(text, lang="te"):
             },
             method="POST",
         )
-        with urllib.request.urlopen(tts_req, timeout=20) as res:
+        with urllib.request.urlopen(tts_req, timeout=10) as res:
             return res.read()
     except Exception as e:
         print(f"❌ Azure TTS error: {e}")
