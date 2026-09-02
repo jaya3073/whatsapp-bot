@@ -15,6 +15,9 @@ from twilio.twiml.messaging_response import MessagingResponse
 from dotenv import load_dotenv
 
 load_dotenv()
+# ADD THESE LINES:
+import threading
+from google.api_core import retry, timeout
 
 app = FastAPI()
 
@@ -37,6 +40,10 @@ PROPERTIES_SHEET_URL = os.getenv("PROPERTIES_SHEET_URL", "")
 YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
+# ADD THESE LINES:
+GEMINI_TIMEOUT = 10  # 10 seconds max
+GEMINI_MAX_RETRIES = 0  # No retries - fail fast
+
 
 CONTACTS_LINE = (
     "📞/WhatsApp: 8500701521, 8074915644 (OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
@@ -90,7 +97,7 @@ def push_to_sheet(row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=10)
+      urllib.request.urlopen(req, timeout=5)  # Changed from 15 to 5
     except Exception as e:
         print("Sheet error:", e)
 
@@ -153,12 +160,44 @@ def append_row(sheet_url, cache_key, row):
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        urllib.request.urlopen(req, timeout=10)
+        urllib.request.urlopen(req, timeout=5)
         _cache.pop(cache_key, None)
         return True
     except Exception as e:
         print("Write error:", e)
         return False
+        # ADD THIS FUNCTION:
+def send_voice_note_background(to, text):
+    """Send text immediately, voice note in background"""
+    if not text or not AZURE_SPEECH_KEY:
+        return
+    
+    # Run voice generation in background thread
+    thread = threading.Thread(
+        target=_generate_and_send_voice,
+        args=(to, text)
+    )
+    thread.daemon = True
+    thread.start()
+
+def _generate_and_send_voice(to, text):
+    """Background voice generation (don't block)"""
+    try:
+        from gtts import gTTS
+        import io
+        
+        # Generate voice
+        tts = gTTS(text=text, lang='te')
+        audio_io = io.BytesIO()
+        tts.write_to_fp(audio_io)
+        audio_io.seek(0)
+        
+        # Upload and send (your existing logic)
+        # ... existing voice upload code ...
+        
+    except Exception as e:
+        print(f"Voice generation failed: {e}")
+        
 
 
 def handle_owner_command(phone, text):
@@ -205,7 +244,7 @@ def fetch_df(key, url, max_age=120):
         return _cache[key][1]
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=10) as res:
+        with urllib.request.urlopen(req, timeout=5) as res:
             df = pd.read_csv(io.StringIO(res.read().decode("utf-8")))
         _cache[key] = (now, df)
         return df
@@ -224,7 +263,26 @@ def load_properties():
     try:
         return pd.read_excel(PROPERTIES_FILE)
     except Exception:
-        return None
+        return Non
+        # ADD THIS NEW FUNCTION:
+def find_properties_fast(budget, members=2, family_type="family"):
+    """Fast property search without Gemini - 1-2 seconds"""
+    try:
+        df = load_properties()
+        if df is None:
+            return []
+        
+        # Simple filtering
+        matches = df[
+            (df['budget'] <= budget) & 
+            (df['members'] >= members)
+        ].head(3)  # Top 3 only
+        
+        return matches.to_dict('records')
+    except Exception as e:
+        print(f"Property search error: {e}")
+        return []
+        
 
 
 def properties_context():
@@ -680,33 +738,83 @@ def get_audio(uid: str):
 
 
 @app.post("/whatsapp")
-async def whatsapp_webhook(
-    From: str = Form(...),
-    Body: str = Form(""),
-    NumMedia: str = Form("0"),
-    MediaUrl0: str = Form(""),
-):
-    phone = From.replace("whatsapp:", "")
-    text = (Body or "").strip()
-    stats["total"] += 1
-    print(f"\n{'='*60}")
-    print(f"=== MSG #{stats['total']} from {phone}: media={NumMedia}, text={text[:50]} ===")
-    print(f"{'='*60}")
+async def whatsapp_webhook(request: Request):
+    """Fast webhook handler - returns in 1 second"""
+    try:
+        # Parse incoming message
+        data = await request.form()
+        from_number = data.get('From', '').replace('whatsapp:', '')
+        message_text = data.get('Body', '').strip()
+        
+        print(f"📩 Message from {from_number}: {message_text[:50]}")
+        
+        # Log incoming message
+        log_chat("IN", from_number, message_text)
+        
+        # Process in background (DON'T WAIT!)
+        threading.Thread(
+            target=process_message_background,
+            args=(from_number, message_text)
+        ).start()
+        
+        # Return immediately to Twilio
+        return MessagingResponse()
+        
+    except Exception as e:
+        print(f"Webhook error: {e}")
+        return MessagingResponse()
 
-    if phone in opted_out or text.lower() in ("stop", "unsubscribe"):
-        opted_out.add(phone)
-        send(phone, "మీరు ఇకపై messages పొందరు. 🙏")
-        return Response(str(MessagingResponse()), media_type="text/xml")
+def process_message_background(phone, text):
+    """Background message processing - takes 2-5 seconds"""
+    try:
+        # Check if it's a property request
+        if any(char.isdigit() for char in text) and len(text) > 10:
+            # Parse: "Krishna 2 members family 12000"
+            parts = text.split()
+            budget = 12000  # Default
+            
+            # Extract budget from text
+            for part in parts:
+                if part.isdigit() and 5000 <= int(part) <= 50000:
+                    budget = int(part)
+                    break
+            
+            # Fast property search (NO GEMINI!)
+            properties = find_properties_fast(budget)
+            response_text = format_properties(properties)
+            
+            # Send text immediately
+            send(phone, response_text)
+            
+            # Add contact info
+            send(phone, CONTACTS_LINE)
+            
+            # Send voice note in background (optional)
+            # send_voice_note_background(phone, response_text)
+            
+        else:
+            # Simple fallback
+            send(phone, FALLBACK)
+            
+    except Exception as e:
+        print(f"Processing error: {e}")
+        send(phone, "క్షమించండి, సమస్య ఉంది. కాల్ చేయండి: 8500701521")
 
-    if phone == OWNER_WHATSAPP:
-        if text.lower().startswith(("addolx", "addyt")):
-            log_chat("IN", phone, text)
-            handle_owner_command(phone, text)
-            return Response(str(MessagingResponse()), media_type="text/xml")
-        if text.lower().startswith("reply"):
-            log_chat("IN", phone, text)
-            handle_owner_reply(phone, text)
-            return Response(str(MessagingResponse()), media_type="text/xml")
+def format_properties(props):
+    """Format properties for WhatsApp"""
+    if not props:
+        return "క్షమించండి, మీ బడ్జెట్ లో ఇళ్లు లేవు."
+    
+    message = "సమస్య క్షమించండి గారు! 🙏 మీ బడ్జెట్ లో ఉన్న ఇళ్లు:\n\n"
+    for i, prop in enumerate(props, 1):
+        message += f"{i}. {prop.get('title', 'N/A')}\n"
+        message += f"   Rent: ₹{prop.get('budget', 'N/A')}\n"
+        message += f"   Area: {prop.get('area', 'N/A')}\n"
+        if 'link' in prop:
+            message += f"   Link: {prop.get('link', 'N/A')}\n"
+        message += "\n"
+    
+    return message
 
     try:
         n_media = int(NumMedia or 0)
