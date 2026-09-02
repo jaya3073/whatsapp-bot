@@ -69,7 +69,8 @@ FALLBACK = (
 )
 
 # Add this before Gemini calls
-import google.generativeai as genai
+# import google.generativeai as genai  # DISABLED
+
 from google.api_core import retry, timeout
 
 # Configure Gemini with strict timeouts
@@ -79,10 +80,8 @@ def get_gemini_response(text):
         model = genai.GenerativeModel(GEMINI_MODEL)
         
         # Set strict timeout - max 10 seconds
-        response = model.generate_content(
-            text,
-            request_options={"timeout": 10}  # 10 seconds max
-        )
+      
+# response = model.generate_content(...)  # DISABLED
         return response.text
     except Exception as e:
         print(f"Gemini error: {e}")
@@ -271,7 +270,31 @@ def find_properties_fast(budget, members=2, family_type="family"):
         df = load_properties()
         if df is None:
             return []
+        def quick_property_search(budget, members=1, family_type="bachelor"):
+    """Instant property search - NO AI, NO DELAY"""
+    try:
+        # Load properties from sheet
+        df = load_properties()
+        if df is None or df.empty:
+            return None
         
+        # Filter by budget
+        matches = df[df['budget'] <= budget].head(3)
+        
+        if matches.empty:
+            return None
+        
+        # Format response
+        response = f"నమస్కారం! మీ బడ్జెట్ ₹{budget} లో ఇళ్లు:\n\n"
+        for i, row in matches.iterrows():
+            response += f"{i+1}. *{row.get('area', 'N/A')} ({row.get('type', 'N/A')})* – ₹{row.get('budget', 'N/A')}\n"
+            if 'link' in row:
+                response += f"   🔗 {row['link']}\n\n"
+        
+        return response
+    except Exception as e:
+        print(f"Search error: {e}")
+        return None
         # Simple filtering
         matches = df[
             (df['budget'] <= budget) & 
@@ -736,70 +759,65 @@ def get_audio(uid: str):
     print(f"✅ Serving audio: {uid}, size: {len(data)} bytes")
     return Response(content=data, media_type=mime)
 
-
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
-    """Fast webhook handler - returns in 1 second"""
+    """ULTRA FAST - Returns in 1 second"""
     try:
-        # Parse incoming message
         data = await request.form()
         from_number = data.get('From', '').replace('whatsapp:', '')
         message_text = data.get('Body', '').strip()
         
         print(f"📩 Message from {from_number}: {message_text[:50]}")
-        
-        # Log incoming message
         log_chat("IN", from_number, message_text)
         
-        # Process in background (DON'T WAIT!)
-        threading.Thread(
-            target=process_message_background,
-            args=(from_number, message_text)
-        ).start()
+        # IMMEDIATE response - NO WAITING
+        # Parse message
+        parts = message_text.split()
+        budget = 6000  # Default
         
-        # Return immediately to Twilio
+        # Extract budget
+        for part in parts:
+            if part.isdigit() and 3000 <= int(part) <= 50000:
+                budget = int(part)
+                break
+        
+        # Extract name (first word)
+        name = parts[0] if parts else "Customer"
+        
+        # Extract members
+        members = 1
+        for part in parts:
+            if part.isdigit() and 1 <= int(part) <= 10:
+                members = int(part)
+                break
+        
+        # Extract family type
+        family_type = "bachelor"
+        if any(word in message_text.lower() for word in ['family', 'fam']):
+            family_type = "family"
+        
+        # Fast property search
+        properties_text = quick_property_search(budget, members, family_type)
+        
+        if properties_text:
+            # Send properties immediately
+            send(from_number, properties_text)
+        else:
+            # Send fallback
+            send(from_number, FALLBACK)
+        
+        # Send contact info
+        send(from_number, CONTACTS_LINE)
+        
+        # Voice note - OPTIONAL & ASYNC
+        # Uncomment below if you want voice notes (will add delay)
+        # threading.Thread(target=send_voice_async, args=(from_number, properties_text or FALLBACK)).start()
+        
         return MessagingResponse()
         
     except Exception as e:
         print(f"Webhook error: {e}")
         return MessagingResponse()
-
-def process_message_background(phone, text):
-    """Background message processing - takes 2-5 seconds"""
-    try:
-        # Check if it's a property request
-        if any(char.isdigit() for char in text) and len(text) > 10:
-            # Parse: "Krishna 2 members family 12000"
-            parts = text.split()
-            budget = 12000  # Default
-            
-            # Extract budget from text
-            for part in parts:
-                if part.isdigit() and 5000 <= int(part) <= 50000:
-                    budget = int(part)
-                    break
-            
-            # Fast property search (NO GEMINI!)
-            properties = find_properties_fast(budget)
-            response_text = format_properties(properties)
-            
-            # Send text immediately
-            send(phone, response_text)
-            
-            # Add contact info
-            send(phone, CONTACTS_LINE)
-            
-            # Send voice note in background (optional)
-            # send_voice_note_background(phone, response_text)
-            
-        else:
-            # Simple fallback
-            send(phone, FALLBACK)
-            
-    except Exception as e:
-        print(f"Processing error: {e}")
-        send(phone, "క్షమించండి, సమస్య ఉంది. కాల్ చేయండి: 8500701521")
-
 def format_properties(props):
     """Format properties for WhatsApp"""
     if not props:
@@ -838,7 +856,8 @@ def format_properties(props):
             sessions[phone] = hist[-12:]
 
             send(phone, reply_text)
-            print("️ Generating voice notes for reply...")
+            print("️ Generating # generate_voice_note(text)  # DISABLED - Too slow
+ for reply...")
             voice_urls = make_voice_urls(reply_text)
             if voice_urls:
                 for url in voice_urls:
@@ -859,7 +878,7 @@ def format_properties(props):
     final = reply if reply else FALLBACK
     send(phone, final)
 
-    print("️ Generating voice notes for text reply...")
+    print("️ Generating # send_voice_note(to, voice_url)  # DISABLED for text reply...")
     voice_urls = make_voice_urls(final)
     if voice_urls:
         for url in voice_urls:
