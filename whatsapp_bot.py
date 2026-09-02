@@ -90,14 +90,14 @@ def get_gemini_response(text):
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
-    try:
+      try:
         req = urllib.request.Request(
             SHEET_WEBHOOK_URL,
             data=json.dumps(row, ensure_ascii=False).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-      urllib.request.urlopen(req, timeout=5)  # Changed from 15 to 5
+        urllib.request.urlopen(req, timeout=5)  # ఇక్కడ 4 spaces indentation మాత్రమే
     except Exception as e:
         print("Sheet error:", e)
 
