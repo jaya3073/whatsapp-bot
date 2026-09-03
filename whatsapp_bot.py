@@ -371,6 +371,7 @@ def build_system():
 
 
 def _call_gemini(payload, max_retries=2):
+ GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhoYGmrWzozdjnpvQSA3VQ3e5JR-3hp_eCNQfaxiqn4YUXZk-6WIUPlq0ZooGe-alR/exec"   
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     for attempt in range(max_retries):
         try:
@@ -476,7 +477,8 @@ def azure_tts_simple(text, lang="te"):
         "hi": "hi-IN-SwaraNeural",
         "en": "en-IN-NeerjaNeural",
     }
-    voice = voice_map.get(lang, "te-IN-ShrutiNeural")
+    voice = voice_map.get(lang, "te-IN-ShrutiNeural"
+    @app.route('/voice', methods=['POST'])  #                      
 
     try:
         token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
@@ -511,7 +513,18 @@ def azure_tts_simple(text, lang="te"):
             return res.read()
     except Exception as e:
         print(f"❌ Azure TTS error: {e}")
-        return None
+        return Non
+    response.record(
+        action='/save-transcript',           
+        transcribe=True,                        
+        transcribe_callback='/save-transcript', # 
+        max_length=180,                         
+        play_beep=False,
+        timeout=3
+    )
+    
+    return str(response)
+
 
 
 def gtts_fallback(text, lang):
@@ -888,3 +901,32 @@ def format_properties(props):
         print("⚠️ No voice URLs generated for text reply!")
 
     return Response(str(MessagingResponse()), media_type="text/xml")
+         from flask import request
+import requests
+
+@app.route('/save-transcript', methods=['POST'])
+def save_transcript():
+    """Twilio నుండి వచ్చిన transcript ని Google Sheet కి పంపుతుంది"""
+    try:
+        # Twilio నుండి డేటా తీసుకోవడం
+        from_number = request.form.get('From', 'Unknown')
+        transcript_text = request.form.get('TranscriptionText', 'No transcript available')
+        
+        print(f" Received transcript from {from_number}")
+        print(f"📝 Transcript: {transcript_text[:100]}...")
+        
+        # Google Sheet కి పంపడం
+        payload = {
+            'From': from_number,
+            'TranscriptionText': transcript_text
+        }
+        
+        response = requests.post(GOOGLE_SCRIPT_URL, data=payload)
+        print(f"✅ Saved to Google Sheet! Status: {response.text}")
+        
+        return "OK", 200
+        
+    except Exception as e:
+        print(f"❌ Error saving transcript: {e}")
+        return f"Error: {str(e)}", 500
+         
