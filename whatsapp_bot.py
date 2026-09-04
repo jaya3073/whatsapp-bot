@@ -233,7 +233,7 @@ def load_properties():
         # ADD THIS NEW FUNCTION:
 
    def find_properties_fast(budget, members=1, family_type="bachelor"):
-  """Instant property search - NO AI, NO DELAY"""
+    """Instant property search - NO AI, NO DELAY"""
     try:
         # ... మిగతా కోడ్
     try:
@@ -930,8 +930,4 @@ async def incoming_call_handler():
         print(f"Voice call error: {e}")
         return Response(content="<Response><Say>Error</Say></Response>", media_type="text/xml")
         
-    except Exception as e:
-        print(f"Voice call error: {e}")
-        error_response = VoiceResponse()
-        error_response.say("క్షమించండి, సమస్య ఉంది", language='te-IN')
-        return Response(content=str(error_response), media_type="text/xml")
+   
