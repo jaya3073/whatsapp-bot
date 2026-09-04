@@ -90,8 +90,9 @@ def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
       try:
-# Google Apps Script URL (Step 1 నుండి)
-GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhoYGmrWzozdjnpvQSA3VQ3e5JR-3hp_eCNQfaxiqn4YUXZk-6WIUPlq0ZooGe-alR/exec"
+          # ===================================================================
+# GOOGLE SHEETS TRANSCRIPT SAVE - NEW CODE
+# ===================================================================
 
 @app.post('/save-transcript')
 async def save_transcript():
@@ -100,10 +101,9 @@ async def save_transcript():
         # Twilio నుండి డేటా తీసుకోవడం
         form_data = await request.form()
         from_number = form_data.get('From', 'Unknown')
-        transcript_text = form_data.get('TranscriptionText', 'No transcript available')
+        transcript_text = form_data.get('TranscriptionText', 'No transcript')
         
-        print(f"📞 Received transcript from {from_number}")
-        print(f"📝 Transcript: {transcript_text[:100]}...")
+        print(f"Received transcript from {from_number}")
         
         # Google Sheet కి పంపడం
         payload = {
@@ -111,14 +111,15 @@ async def save_transcript():
             'TranscriptionText': transcript_text
         }
         
-        response = requests.post(GOOGLE_SCRIPT_URL, data=payload)
-        print(f"✅ Saved to Google Sheet! Status: {response.text}")
+        requests.post(GOOGLE_SCRIPT_URL, data=payload)
+        print("Saved to Google Sheet!")
         
         return "OK"
         
     except Exception as e:
-        print(f"❌ Error saving transcript: {e}")
+        print(f"Error: {e}")
         return f"Error: {str(e)}"
+
           
                         
 def normalize_phone(num):
