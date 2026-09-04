@@ -231,12 +231,7 @@ def load_properties():
     except Exception:
         return Non
         # ADD THIS NEW FUNCTION:
-def find_properties_fast(budget, members=2, family_type="family"):
-    """Fast property search without Gemini - 1-2 seconds"""
-    try:
-        df = load_properties()
-        if df is None:
-            return []
+
    def find_properties_fast(budget, members=1, family_type="bachelor"):
   """Instant property search - NO AI, NO DELAY"""
     try:
