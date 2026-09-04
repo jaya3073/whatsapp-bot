@@ -352,7 +352,7 @@ def build_system():
 
 
 def _call_gemini(payload, max_retries=2):
- GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhoYGmrWzozdjnpvQSA3VQ3e5JR-3hp_eCNQfaxiqn4YUXZk-6WIUPlq0ZooGe-alR/exec"   
+    GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhoYGmrWzozdjnpvQSA3VQ3e5JR-3hp_eCNQfaxiqn4YUXZk-6WIUPlq0ZooGe-a1R/exec"
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     for attempt in range(max_retries):
         try:
@@ -362,7 +362,7 @@ def _call_gemini(payload, max_retries=2):
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-                       with urllib.request.urlopen(req, timeout=10) as res:
+            with urllib.request.urlopen(req, timeout=10) as res:
                 data = json.loads(res.read().decode("utf-8"))
                 return data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception as e:
