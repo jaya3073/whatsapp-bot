@@ -91,9 +91,7 @@ def get_gemini_response(text):
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
-      try:
-        
-                     
+    
 def normalize_phone(num):
     digits = re.sub(r"\D", "", num)
     if digits.startswith("91") and len(digits) == 12:
@@ -861,19 +859,19 @@ def format_properties(props):
         print("⚠️ No voice URLs generated for text reply!")
 
     return Response(str(MessagingResponse()), media_type="text/xml")
-         from flask import request
 import requests
 
 @app.post('/save-transcript')
-async def save_transcript():
+async def save_transcript(
+    From: str = Form("Unknown"),
+    TranscriptionText: str = Form("No transcript")
+):
     try:
-        form_data = await request.form()
-        from_number = form_data.get('From', 'Unknown')
-        transcript_text = form_data.get('TranscriptionText', 'No transcript')
-        payload = {'From': from_number, 'TranscriptionText': transcript_text}
+        payload = {'From': From, 'TranscriptionText': TranscriptionText}
         requests.post(GOOGLE_SCRIPT_URL, data=payload)
         print("Saved to Google Sheet!")
         return "OK"
     except Exception as e:
         print(f"Error: {e}")
         return "Error"
+        
