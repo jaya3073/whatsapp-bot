@@ -90,50 +90,37 @@ def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
       try:
-        req = urllib.request.Request(
-            SHEET_WEBHOOK_URL,
-            data=json.dumps(row, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        urllib.request.urlopen(req, timeout=5)  # ఇక్కడ 4 spaces indentation మాత్రమే
-    except Exception as e:
-        print("Sheet error:", e)
+# Google Apps Script URL (Step 1 నుండి)
+GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhoYGmrWzozdjnpvQSA3VQ3e5JR-3hp_eCNQfaxiqn4YUXZk-6WIUPlq0ZooGe-alR/exec"
 
-
-def log_chat(direction, phone, body):
-    push_to_sheet({
-        "sheet": "Chats",
-        "direction": direction,
-        "phone": phone,
-        "message": body,
-    })
-
-
-def send(to, body, media_url=None):
+@app.post('/save-transcript')
+async def save_transcript():
+    """Twilio నుండి వచ్చిన transcript ని Google Sheet కి పంపుతుంది"""
     try:
-        kwargs = {
-            "from_": f"whatsapp:{WHATSAPP_FROM}",
-            "to": f"whatsapp:{to}",
+        # Twilio నుండి డేటా తీసుకోవడం
+        form_data = await request.form()
+        from_number = form_data.get('From', 'Unknown')
+        transcript_text = form_data.get('TranscriptionText', 'No transcript available')
+        
+        print(f"📞 Received transcript from {from_number}")
+        print(f"📝 Transcript: {transcript_text[:100]}...")
+        
+        # Google Sheet కి పంపడం
+        payload = {
+            'From': from_number,
+            'TranscriptionText': transcript_text
         }
-        if body:
-            kwargs["body"] = body
-        if media_url:
-            kwargs["media_url"] = [media_url]
-            print(f"📤 Sending media_url: {media_url[:80]}...")
-
-        message = client.messages.create(**kwargs)
-        print(f"✅ Message sent: {message.sid}")
-
-        if body:
-            log_chat("OUT", to, body)
+        
+        response = requests.post(GOOGLE_SCRIPT_URL, data=payload)
+        print(f"✅ Saved to Google Sheet! Status: {response.text}")
+        
+        return "OK"
+        
     except Exception as e:
-        print(f"❌ Send error: {e}")
-        print(f"   To: {to}")
-        print(f"   Body: {body[:50] if body else 'None'}")
-        print(f"   Media: {media_url[:80] if media_url else 'None'}")
-
-
+        print(f"❌ Error saving transcript: {e}")
+        return f"Error: {str(e)}"
+          
+                        
 def normalize_phone(num):
     digits = re.sub(r"\D", "", num)
     if digits.startswith("91") and len(digits) == 12:
