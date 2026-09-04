@@ -91,7 +91,16 @@ def get_gemini_response(text):
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
-    
+    try:
+        req = urllib.request.Request(
+            SHEET_WEBHOOK_URL,
+            data=json.dumps(row, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print("Sheet error:", e)    
 def normalize_phone(num):
     digits = re.sub(r"\D", "", num)
     if digits.startswith("91") and len(digits) == 12:
