@@ -226,7 +226,7 @@ def load_properties():
         df = fetch_df("props", PROPERTIES_SHEET_URL)
         if df is not None and not df.empty:
             return df
-      try:
+    try:
         return pd.read_excel(PROPERTIES_FILE)
     except Exception:
         return None
