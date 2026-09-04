@@ -10,6 +10,7 @@ import xml.sax.saxutils as saxutils
 import pandas as pd
 from gtts import gTTS
 from fastapi import FastAPI, Form, Response
+import requests
 from twilio.rest import Client
 from twilio.twiml.messaging_response import MessagingResponse
 from dotenv import load_dotenv
@@ -25,10 +26,11 @@ TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 
 client = Client(TWILIO_SID, TWILIO_TOKEN)
-
+GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzhoYGmrWzozdjnpvQSA3VQ3e5JR-3hp_eCNQfaxiqn4YUXZk-6WIUPlq0ZooGe-alR/exec"
 WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "+14155238886")
 OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918074915644")
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
+
 SHEET_WRITE_URL = os.getenv("SHEET_WRITE_URL", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
@@ -90,38 +92,8 @@ def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
       try:
-          # ===================================================================
-# GOOGLE SHEETS TRANSCRIPT SAVE - NEW CODE
-# ===================================================================
-
-@app.post('/save-transcript')
-async def save_transcript():
-    """Twilio నుండి వచ్చిన transcript ని Google Sheet కి పంపుతుంది"""
-    try:
-        # Twilio నుండి డేటా తీసుకోవడం
-        form_data = await request.form()
-        from_number = form_data.get('From', 'Unknown')
-        transcript_text = form_data.get('TranscriptionText', 'No transcript')
         
-        print(f"Received transcript from {from_number}")
-        
-        # Google Sheet కి పంపడం
-        payload = {
-            'From': from_number,
-            'TranscriptionText': transcript_text
-        }
-        
-        requests.post(GOOGLE_SCRIPT_URL, data=payload)
-        print("Saved to Google Sheet!")
-        
-        return "OK"
-        
-    except Exception as e:
-        print(f"Error: {e}")
-        return f"Error: {str(e)}"
-
-          
-                        
+                     
 def normalize_phone(num):
     digits = re.sub(r"\D", "", num)
     if digits.startswith("91") and len(digits) == 12:
@@ -892,29 +864,16 @@ def format_properties(props):
          from flask import request
 import requests
 
-@app.route('/save-transcript', methods=['POST'])
-def save_transcript():
-    """Twilio నుండి వచ్చిన transcript ని Google Sheet కి పంపుతుంది"""
+@app.post('/save-transcript')
+async def save_transcript():
     try:
-        # Twilio నుండి డేటా తీసుకోవడం
-        from_number = request.form.get('From', 'Unknown')
-        transcript_text = request.form.get('TranscriptionText', 'No transcript available')
-        
-        print(f" Received transcript from {from_number}")
-        print(f"📝 Transcript: {transcript_text[:100]}...")
-        
-        # Google Sheet కి పంపడం
-        payload = {
-            'From': from_number,
-            'TranscriptionText': transcript_text
-        }
-        
-        response = requests.post(GOOGLE_SCRIPT_URL, data=payload)
-        print(f"✅ Saved to Google Sheet! Status: {response.text}")
-        
-        return "OK", 200
-        
+        form_data = await request.form()
+        from_number = form_data.get('From', 'Unknown')
+        transcript_text = form_data.get('TranscriptionText', 'No transcript')
+        payload = {'From': from_number, 'TranscriptionText': transcript_text}
+        requests.post(GOOGLE_SCRIPT_URL, data=payload)
+        print("Saved to Google Sheet!")
+        return "OK"
     except Exception as e:
-        print(f"❌ Error saving transcript: {e}")
-        return f"Error: {str(e)}", 500
-         
+        print(f"Error: {e}")
+        return "Error"
