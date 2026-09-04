@@ -226,16 +226,13 @@ def load_properties():
         df = fetch_df("props", PROPERTIES_SHEET_URL)
         if df is not None and not df.empty:
             return df
-    try:
+      try:
         return pd.read_excel(PROPERTIES_FILE)
     except Exception:
-        return Non
-        # ADD THIS NEW FUNCTION:
+        return None
 
-   def find_properties_fast(budget, members=1, family_type="bachelor"):
+def find_properties_fast(budget, members=1, family_type="bachelor"):
     """Instant property search - NO AI, NO DELAY"""
-    try:
-        # ... మిగతా కోడ్
     try:
         df = load_properties()
         if df is None or df.empty:
