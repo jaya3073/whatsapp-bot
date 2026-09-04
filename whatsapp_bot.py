@@ -237,8 +237,10 @@ def find_properties_fast(budget, members=2, family_type="family"):
         df = load_properties()
         if df is None:
             return []
-    def find_properties_fast(budget, members=1, family_type="bachelor"):
-    """Instant property search - NO AI, NO DELAY"""
+   def find_properties_fast(budget, members=1, family_type="bachelor"):
+  """Instant property search - NO AI, NO DELAY"""
+    try:
+        # ... మిగతా కోడ్
     try:
         df = load_properties()
         if df is None or df.empty:
