@@ -883,4 +883,34 @@ async def save_transcript(
     except Exception as e:
         print(f"Error: {e}")
         return "Error"
+        from twilio.twiml.voice_response import VoiceResponse
+from fastapi import Request, Form
+from fastapi.responses import Response
+
+@app.post('/incoming-call')
+async def incoming_call_handler():
+    """Handle incoming voice calls from Exotel"""
+    try:
+        response = VoiceResponse()
         
+        # Welcome message in Telugu
+        response.say("నమస్తే అండి, శివ హౌస్ రెంటల్ ఏజెన్సీ", language='te-IN', voice='Polly.Aditi')
+        response.say("మీరు ఇల్లు అద్దెకు చూస్తున్నారా?", language='te-IN', voice='Polly.Aditi')
+        
+        # Record the conversation for transcription
+        response.record(
+            action='/save-transcript',
+            transcribe=True,
+            transcribe_callback='/save-transcript',
+            max_length=180,  # 3 minutes max
+            play_beep=False,
+            timeout=3
+        )
+        
+        return Response(content=str(response), media_type="text/xml")
+        
+    except Exception as e:
+        print(f"Voice call error: {e}")
+        error_response = VoiceResponse()
+        error_response.say("క్షమించండి, సమస్య ఉంది", language='te-IN')
+        return Response(content=str(error_response), media_type="text/xml")
