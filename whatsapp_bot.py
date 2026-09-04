@@ -237,8 +237,28 @@ def find_properties_fast(budget, members=2, family_type="family"):
         df = load_properties()
         if df is None:
             return []
-        def quick_property_search(budget, members=1, family_type="bachelor"):
+    def find_properties_fast(budget, members=1, family_type="bachelor"):
     """Instant property search - NO AI, NO DELAY"""
+    try:
+        df = load_properties()
+        if df is None or df.empty:
+            return []
+        
+        matches = df[df['budget'] <= budget].head(3)
+        
+        if matches.empty:
+            return []
+        
+        response = f"నమస్కారం! మీ బడ్జెట్ ₹{budget} లో ఇళ్లు:\n\n"
+        for i, row in matches.iterrows():
+            response += f"{i+1}. *{row.get('area', 'N/A')} ({row.get('type', 'N/A')})* – ₹{row.get('budget', 'N/A')}\n"
+            if 'link' in row:
+                response += f"   🔗 {row['link']}\n\n"
+        
+        return response
+    except Exception as e:
+        print(f"Search error: {e}")
+        return None  
     try:
         # Load properties from sheet
         df = load_properties()
