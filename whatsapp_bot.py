@@ -904,27 +904,31 @@ async def save_transcript(
 from fastapi import Request, Form
 from fastapi.responses import Response
 
-@app.post('/incoming-call')
+@app.api_route('/incoming-call', methods=["GET", "POST"])
 async def incoming_call_handler():
-    """Handle incoming voice calls from Exotel"""
+    """Handle incoming voice calls from Exotel - Simplified"""
     try:
         response = VoiceResponse()
         
-        # Welcome message in Telugu
-        response.say("నమస్తే అండి, శివ హౌస్ రెంటల్ ఏజెన్సీ", language='te-IN', voice='Polly.Aditi')
-        response.say("మీరు ఇల్లు అద్దెకు చూస్తున్నారా?", language='te-IN', voice='Polly.Aditi')
+        # సింపుల్ మెసేజ్ (Exotel కంపాటిబిలిటీ కోసం voice/language తొలగించాము)
+        response.say("Namaste, Shiva House Rental Agency.")
+        response.say("Meeru illu addelaku chustunnara?")
         
-        # Record the conversation for transcription
+        # రికార్డింగ్ (అవసరమైతే)
         response.record(
             action='/save-transcript',
             transcribe=True,
             transcribe_callback='/save-transcript',
-            max_length=180,  # 3 minutes max
+            max_length=60,
             play_beep=False,
             timeout=3
         )
         
         return Response(content=str(response), media_type="text/xml")
+        
+    except Exception as e:
+        print(f"Voice call error: {e}")
+        return Response(content="<Response><Say>Error</Say></Response>", media_type="text/xml")
         
     except Exception as e:
         print(f"Voice call error: {e}")
