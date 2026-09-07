@@ -170,20 +170,23 @@ def quick_property_search(budget, members=1, family_type="family"):
             rent = row.get('budget', '')
             link = row.get('link', '')
 
-            response += f"{i}. *{title}* ({area}) - ₹{rent}\n"
-            if link and str(link).strip() != "nan":
-                response += f"   🔗 {link}\n"
-            response += "\n"
+    response += f"{i}. *{title}* ({area}) - ₹{rent}\n"
+        if link and str(link).strip() != "nan":
+            response += f"   🔗 {link}\n"
+        response += "\n"
 
-        response += f"\n{FEES_MESSAGE}\n\nమిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503\nYouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"
+    response += (
+        f"\n{FEES_MESSAGE}\n\n"
+        "మిగిలిన ఇళ్లు (40+ ads) మా OLX profile లో చూడండి:\n"
+        "https://www.olx.in/profile/129751503\n\n"
+        "YouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts\n\n"
+        "Follow this link to view our catalogue on WhatsApp: https://wa.me/c/918074915644"
+    )
 
-     response += (
-            f"\n{FEES_MESSAGE}\n\n"
-            "మిగిలిన ఇళ్లు (40+ ads) మా OLX profile లో చూడండి:\n"
-            "https://www.olx.in/profile/129751503\n\n"
-            "YouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts\n\n"
-            "Follow this link to view our catalogue on WhatsApp: https://wa.me/c/918074915644"
-        ) 
+    return response
+except Exception as e:
+    print(f"Search error: {e}")
+    return None      
     voice_map = {
         "te": "te-IN-ShrutiNeural",
         "hi": "hi-IN-SwaraNeural",
