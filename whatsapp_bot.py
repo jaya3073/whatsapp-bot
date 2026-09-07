@@ -62,7 +62,14 @@ FALLBACK = (
     f"YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
 )
-
+FEES_MESSAGE = (
+    "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మీ బడ్జెట్ లో మూడు లేదా ఐదు ఇళ్లు చూపిస్తాము. "
+    "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. ఐదు వేలు ఉంటుంది. "
+    "ఐదు వేల లో ఇనిషియల్ గా ఎనిమిది వందలు తీసుకుంటాము. ఎనిమిది వందలు తీసుకొని రూమ్స్ అన్నీ చూపిస్తాము. "
+    "మీరు రూమ్ కి అడ్వాన్స్ ఇచ్చేటప్పుడు ఫోర్ థౌసండ్ టూ హండ్రెడ్ ఇవ్వాల్సి ఉంటుంది. టోటల్ అయిదు వేలు. "
+    "ఎనిమిది వందలు ప్లస్ నాలుగు వేల రెండు వందలు. ఎనిమిది వేల లోపు రెంట్ ఉన్నవాటికి అయితే "
+    "నాలుగు వేలు మాత్రమే ఉంటుంది. ఇంటరెస్టెడ్ అయితే కాల్ చేయండి, శివ, 8500701521 or 8074915644."
+)
 _cache = {}
 audio_store = {}
 sessions = {}
@@ -176,7 +183,14 @@ def quick_property_search(budget, members=1, family_type="family"):
     except Exception as e:
         print(f"Search error: {e}")
         return None
+response_text = f"""నమస్కారం! మీ బడ్జెట్ లోపు ఉన్న ఇళ్లు:
 
+{house_list_text}
+
+{FEES_MESSAGE}
+
+మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503
+YouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"""
 
 # Audio & TTS Services
 def azure_tts_simple(text, lang="te"):
