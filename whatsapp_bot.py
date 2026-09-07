@@ -177,20 +177,15 @@ def quick_property_search(budget, members=1, family_type="family"):
             response += f"{i}. *{title}* ({area}) – ₹{rent}\n"
             if link and str(link).strip() != "nan":
                 response += f"   🔗 {link}\n"
-            response += "\n"
+ response += "\n"
 
-        return response
+    response += f"\n{FEES_MESSAGE}\n\nమిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503\nYouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"
+
+    return response           
     except Exception as e:
         print(f"Search error: {e}")
         return None
-response_text = f"""నమస్కారం! మీ బడ్జెట్ లోపు ఉన్న ఇళ్లు:
 
-{house_list_text}
-
-{FEES_MESSAGE}
-
-మిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503
-YouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"""
 
 # Audio & TTS Services
 def azure_tts_simple(text, lang="te"):
