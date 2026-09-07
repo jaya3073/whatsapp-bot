@@ -3,6 +3,12 @@ import re
 import io
 import json
 import time
+import pandas as pd
+
+CACHED_HOUSES = None
+LAST_FETCH_TIME = 0
+CACHE_DURATION = 300  # 5 నిమిషాలు (సెకన్లలో)
+import time
 import uuid
 import base64
 import urllib.request
