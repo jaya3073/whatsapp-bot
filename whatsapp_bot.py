@@ -167,26 +167,17 @@ def quick_property_search(budget, members=1, family_type="family"):
         if matches.empty:
             return None
 
-        response = f"నమస్కారం! మీ బడ్జెట్ ₹{budget} లోపు ఉన్న ఇళ్లు:\n\n"
-        for i, (_, row) in enumerate(matches.iterrows(), 1):
-            title = row.get('title', row.get('area', 'ఇల్లు'))
-            area = row.get('area', '')
-            rent = row.get('budget', '')
-            link = row.get('link', '')
-
-            response += f"{i}. *{title}* ({area}) – ₹{rent}\n"
+        response += f"{i}. *{title}* ({area}) - ₹{rent}\n"
             if link and str(link).strip() != "nan":
                 response += f"   🔗 {link}\n"
-        response += "\n"
+            response += "\n"
 
-    response += f"\n{FEES_MESSAGE}\n\nమిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503\nYouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"
+        response += f"\n{FEES_MESSAGE}\n\nమిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503\nYouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"
 
-    return response           
+        return response
     except Exception as e:
         print(f"Search error: {e}")
-        return None
-
-
+        return None       
 # Audio & TTS Services
 def azure_tts_simple(text, lang="te"):
     if not AZURE_SPEECH_KEY:
