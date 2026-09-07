@@ -47,9 +47,7 @@ YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
-CONTACTS_LINE = (
-    "📞/WhatsApp: 8500701521, 8074915644 (OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
-)
+CONTACTS_LINE = "📞Contact : Shiva 8500701521, 8074915644 (OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
 
 FALLBACK = (
     "నమస్కారం! శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
@@ -63,12 +61,10 @@ FALLBACK = (
     + CONTACTS_LINE
 )
 FEES_MESSAGE = (
-    "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మీ బడ్జెట్ లో మూడు లేదా ఐదు ఇళ్లు చూపిస్తాము. "
-    "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. ఐదు వేలు ఉంటుంది. "
-    "ఐదు వేల లో ఇనిషియల్ గా ఎనిమిది వందలు తీసుకుంటాము. ఎనిమిది వందలు తీసుకొని రూమ్స్ అన్నీ చూపిస్తాము. "
-    "మీరు రూమ్ కి అడ్వాన్స్ ఇచ్చేటప్పుడు ఫోర్ థౌసండ్ టూ హండ్రెడ్ ఇవ్వాల్సి ఉంటుంది. టోటల్ అయిదు వేలు. "
-    "ఎనిమిది వందలు ప్లస్ నాలుగు వేల రెండు వందలు. ఎనిమిది వేల లోపు రెంట్ ఉన్నవాటికి అయితే "
-    "నాలుగు వేలు మాత్రమే ఉంటుంది. ఇంటరెస్టెడ్ అయితే కాల్ చేయండి, శివ, 8500701521 or 8074915644."
+    "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మాది service ఉంటుంది. మీ బడ్జెట్ లో 3 or 5 houses చూపిస్తాము. "
+    "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. 5000 ఉంటుంది. 5000 లో ఇనిషియల్ గా 800 తీసుకుంటాము. "
+    "రూమ్స్ అన్నీ చూపిస్తాము. మీరు రూమ్ కి అడ్వాన్స్ ఇచ్చేటప్పుడు 4200 ఇవ్వాల్సి ఉంటుంది. "
+    "Total 5000. 8000 లోపు రెంట్ ఉన్నవాటికి అయితే నాలుగు వేలు మాత్రమే ఉంటుంది."
 )
 _cache = {}
 audio_store = {}
@@ -181,15 +177,13 @@ def quick_property_search(budget, members=1, family_type="family"):
 
         response += f"\n{FEES_MESSAGE}\n\nమిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503\nYouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"
 
-        return response
-    except Exception as e:
-        print(f"Search error: {e}")
-        return None
-# Audio & TTS Services
-def azure_tts_simple(text, lang="te"):
-    if not AZURE_SPEECH_KEY:
-        return None
-
+     response += (
+            f"\n{FEES_MESSAGE}\n\n"
+            "మిగిలిన ఇళ్లు (40+ ads) మా OLX profile లో చూడండి:\n"
+            "https://www.olx.in/profile/129751503\n\n"
+            "YouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts\n\n"
+            "Follow this link to view our catalogue on WhatsApp: https://wa.me/c/918074915644"
+        ) 
     voice_map = {
         "te": "te-IN-ShrutiNeural",
         "hi": "hi-IN-SwaraNeural",
