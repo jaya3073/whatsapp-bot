@@ -164,13 +164,19 @@ def quick_property_search(budget, members=1, family_type="family"):
         else:
             matches = df.head(3)
 
-        if matches.empty:
-            return None
+    if matches.empty:
+        return None
 
-    response += f"{i}. *{title}* ({area}) - ₹{rent}\n"
-    if link and str(link).strip() != "nan":
-        response += f"   🔗 {link}\n"
-    response += "\n"
+    for i, (_, row) in enumerate(matches.iterrows(), 1):
+        title = row.get('title', '')
+        area = row.get('area', '')
+        rent = row.get('budget', '')
+        link = row.get('link', '')
+
+        response += f"{i}. *{title}* ({area}) - ₹{rent}\n"
+        if link and str(link).strip() != "nan":
+            response += f"   🔗 {link}\n"
+        response += "\n"
 
     response += f"\n{FEES_MESSAGE}\n\nమిగిలిన ఇళ్లు (30+ ads) మా OLX profile లో చూడండి: https://www.olx.in/profile/129751503\nYouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts"
 
