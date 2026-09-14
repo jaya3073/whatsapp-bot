@@ -1,20 +1,32 @@
+# whatsapp_bot.py — Shiva House Rental Agency
+# WhatsApp bot with property search, voice, and email notifications.
+#
+# Required environment variables (set in Render -> Environment):
+#   TWILIO_ACCOUNT_SID
+#   TWILIO_AUTH_TOKEN
+#   TWILIO_WHATSAPP_FROM       (e.g. +14155238886)
+#   OWNER_WHATSAPP             (e.g. +918074915644)
+#   GEMINI_API_KEY
+#   PROPERTIES_SHEET_URL       (CSV export link of your Google Sheet)
+#   BASE_URL                   (your Render URL for this bot)
+#   AZURE_SPEECH_KEY           (optional, for high-quality TTS)
+#   AZURE_SPEECH_REGION        (e.g. centralindia)
+#   GMAIL_ADDRESS              (e.g. sbc4199@gmail.com)
+#   GMAIL_APP_PASSWORD          (16-letter App Password from Google — NEVER paste in chat)
+
 import os
 import re
 import io
 import json
 import time
-import pandas as pd
-
-CACHED_HOUSES = None
-LAST_FETCH_TIME = 0
-CACHE_DURATION = 300  # 5 నిమిషాలు (సెకన్లలో)
-import time
 import uuid
-import base64
-import urllib.request
-import xml.sax.saxutils as saxutils
+import smtplib
 import threading
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from concurrent.futures import ThreadPoolExecutor
+import xml.sax.saxutils as saxutils
+import urllib.request
 
 import pandas as pd
 from gtts import gTTS
@@ -27,7 +39,8 @@ load_dotenv()
 
 app = FastAPI()
 
-# Configuration & Keys
+# ─── Configuration & Keys ─────────────────────────────────────────────
+
 TWILIO_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
 TWILIO_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
 client = Client(TWILIO_SID, TWILIO_TOKEN) if TWILIO_SID and TWILIO_TOKEN else None
@@ -47,7 +60,15 @@ YOUTUBE_SHEET_URL = os.getenv("YOUTUBE_SHEET_URL", "")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
 AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "centralindia")
 
-CONTACTS_LINE = "📞Contact : Shiva 8500701521, 8074915644 (OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
+# Email configuration
+GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS", "sbc4199@gmail.com")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")  # 16-letter App Password
+OWNER_EMAIL = os.getenv("OWNER_EMAIL", "sbc4199@gmail.com")  # where notifications go
+
+CONTACTS_LINE = (
+    "📞Contact : Shiva 8500701521, 8074915644 "
+    "(OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
+)
 
 FALLBACK = (
     "నమస్కారం! శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
@@ -60,19 +81,24 @@ FALLBACK = (
     f"YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
 )
+
 FEES_MESSAGE = (
-    "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మాది service ఉంటుంది. మీ బడ్జెట్ లో 3 or 5 houses చూపిస్తాము. "
-    "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. 5000 ఉంటుంది. 5000 లో ఇనిషియల్ గా 800 తీసుకుంటాము. "
+    "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మాది service ఉంటుంది. "
+    "మీ బడ్జెట్ లో 3 or 5 houses చూపిస్తాము. "
+    "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. "
+    "5000 ఉంటుంది. 5000 లో ఇనిషియల్ గా 800 తీసుకుంటాము. "
     "రూమ్స్ అన్నీ చూపిస్తాము. మీరు రూమ్ కి అడ్వాన్స్ ఇచ్చేటప్పుడు 4200 ఇవ్వాల్సి ఉంటుంది. "
     "Total 5000. 8000 లోపు రెంట్ ఉన్నవాటికి అయితే నాలుగు వేలు మాత్రమే ఉంటుంది."
 )
+
 _cache = {}
 audio_store = {}
 sessions = {}
 stats = {"total": 0, "voice_in": 0, "voice_out": 0}
 
 
-# Google Sheets Utilities
+# ─── Google Sheets Utilities ──────────────────────────────────────────
+
 def push_to_sheet(row):
     if not SHEET_WEBHOOK_URL:
         return
@@ -97,6 +123,62 @@ def log_chat(direction, phone, body):
     })
 
 
+# ─── Email Integration ───────────────────────────────────────────────
+
+def send_email(subject, body, to_addr=None):
+    """Send an email notification via Gmail App Password.
+
+    Returns True on success, False on failure.
+    The GMAIL_APP_PASSWORD must be set in environment variables — never
+    hardcode it in this file.
+    """
+    if not GMAIL_APP_PASSWORD:
+        print("Email skipped: GMAIL_APP_PASSWORD not set")
+        return False
+
+    to_addr = to_addr or OWNER_EMAIL
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"] = GMAIL_ADDRESS
+        msg["To"] = to_addr
+        msg["Subject"] = subject
+
+        # Plain text version
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
+            smtp.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
+            smtp.sendmail(GMAIL_ADDRESS, to_addr, msg.as_string())
+
+        print(f"📧 Email sent to {to_addr}: {subject}")
+        return True
+    except Exception as e:
+        print(f"Email error: {e}")
+        return False
+
+
+def send_email_background(subject, body, to_addr=None):
+    """Fire-and-forget email so the webhook response is not delayed."""
+    thread = threading.Thread(target=send_email, args=(subject, body, to_addr))
+    thread.daemon = True
+    thread.start()
+
+
+def notify_owner_new_lead(phone, message_text):
+    """Send the owner an email when a new client messages the bot."""
+    subject = f"🏠 New Lead from {phone}"
+    body = (
+        f"New WhatsApp lead received!\n\n"
+        f"From: {phone}\n"
+        f"Message: {message_text}\n"
+        f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"Reply on WhatsApp: https://wa.me/{phone.lstrip('+')}\n"
+    )
+    send_email_background(subject, body)
+
+
+# ─── WhatsApp Send ────────────────────────────────────────────────────
+
 def send(to, body, media_url=None):
     if not client:
         print("Twilio client is not configured.")
@@ -118,6 +200,8 @@ def send(to, body, media_url=None):
     except Exception as e:
         print(f"❌ Send error: {e}")
 
+
+# ─── Property Search ─────────────────────────────────────────────────
 
 def fetch_df(key, url, max_age=120):
     now = time.time()
@@ -153,22 +237,21 @@ def quick_property_search(budget, members=1, family_type="family"):
         if df is None or df.empty:
             return None
 
-        # Ensure budget column is numeric
-        if 'budget' in df.columns:
-            df['budget_num'] = pd.to_numeric(df['budget'], errors='coerce')
-            matches = df[df['budget_num'] <= budget].head(3)
+        if "budget" in df.columns:
+            df["budget_num"] = pd.to_numeric(df["budget"], errors="coerce")
+            matches = df[df["budget_num"] <= budget].head(3)
         else:
             matches = df.head(3)
 
         if matches.empty:
             return None
 
-        response = "" 
+        response = ""
         for i, (_, row) in enumerate(matches.iterrows(), 1):
-            title = row.get('title', '')
-            area = row.get('area', '')
-            rent = row.get('budget', '')
-            link = row.get('link', '')
+            title = row.get("title", "")
+            area = row.get("area", "")
+            rent = row.get("budget", "")
+            link = row.get("link", "")
 
             response += f"{i}. *{title}* ({area}) - ₹{rent}\n"
             if link and str(link).strip() != "nan":
@@ -180,22 +263,34 @@ def quick_property_search(budget, members=1, family_type="family"):
             "మిగిలిన ఇళ్లు (40+ ads) మా OLX profile లో చూడండి:\n"
             "https://www.olx.in/profile/129751503\n\n"
             "YouTube Shorts: https://youtube.com/@shivahouserentalagency745/shorts\n\n"
-            "Follow this link to view our catalogue on WhatsApp: https://wa.me/c/918074915644"
+            "Follow this link to view our catalogue on WhatsApp: "
+            "https://wa.me/c/918074915644"
         )
 
         return response
     except Exception as e:
         print(f"Search error: {e}")
-        return None       
-    voice_map = {
-        "te": "te-IN-ShrutiNeural",
-        "hi": "hi-IN-SwaraNeural",
-        "en": "en-IN-NeerjaNeural",
-    }
-    voice = voice_map.get(lang, "te-IN-ShrutiNeural")
+        return None
 
+
+# ─── Text-to-Speech ──────────────────────────────────────────────────
+
+voice_map = {
+    "te": "te-IN-ShrutiNeural",
+    "hi": "hi-IN-SwaraNeural",
+    "en": "en-IN-NeerjaNeural",
+}
+
+
+def azure_tts_simple(text, lang="te"):
+    if not AZURE_SPEECH_KEY:
+        return None
+    voice = voice_map.get(lang, "te-IN-ShrutiNeural")
     try:
-        token_url = f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com/sts/v1.0/issueToken"
+        token_url = (
+            f"https://{AZURE_SPEECH_REGION}.api.cognitive.microsoft.com"
+            f"/sts/v1.0/issueToken"
+        )
         token_req = urllib.request.Request(
             token_url,
             data=b"",
@@ -209,9 +304,12 @@ def quick_property_search(budget, members=1, family_type="family"):
         ssml = (
             f'<speak version="1.0" xml:lang="en-US">'
             f'<voice xml:lang="en-US" name="{voice}">{safe_text}</voice>'
-            f'</speak>'
+            f"</speak>"
         )
-        tts_url = f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1"
+        tts_url = (
+            f"https://{AZURE_SPEECH_REGION}.tts.speech.microsoft.com"
+            f"/cognitiveservices/v1"
+        )
         tts_req = urllib.request.Request(
             tts_url,
             data=ssml.encode("utf-8"),
@@ -249,9 +347,9 @@ def send_voice_background(to, text, lang="te"):
             return
         uid = uuid.uuid4().hex
         audio_store[uid] = {
-            'data': audio,
-            'mime': "audio/mpeg",
-            'created_at': time.time(),
+            "data": audio,
+            "mime": "audio/mpeg",
+            "created_at": time.time(),
         }
         send(to, None, media_url=f"{BASE_URL}/audio/{uid}")
 
@@ -260,7 +358,8 @@ def send_voice_background(to, text, lang="te"):
     thread.start()
 
 
-# FastAPI Web Routes
+# ─── FastAPI Web Routes ──────────────────────────────────────────────
+
 @app.get("/")
 def health():
     return {"status": "ok", "service": "Shiva House Rental Agency Bot"}
@@ -271,19 +370,23 @@ def get_audio(uid: str):
     item = audio_store.get(uid)
     if not item:
         return Response(status_code=404, content="Audio not found")
-    return Response(content=item['data'], media_type=item['mime'])
+    return Response(content=item["data"], media_type=item["mime"])
 
 
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     try:
         data = await request.form()
-        from_number = data.get('From', '').replace('whatsapp:', '').strip()
-        message_text = data.get('Body', '').strip()
+        from_number = data.get("From", "").replace("whatsapp:", "").strip()
+        message_text = data.get("Body", "").strip()
 
         print(f"📩 Message from {from_number}: {message_text}")
         if from_number:
             log_chat("IN", from_number, message_text)
+
+        # ── Email notification to owner about new lead ──
+        if from_number and message_text:
+            notify_owner_new_lead(from_number, message_text)
 
         # Budget calculation
         parts = message_text.split()
@@ -302,7 +405,17 @@ async def whatsapp_webhook(request: Request):
         else:
             send(from_number, FALLBACK)
 
-        return Response(content=str(MessagingResponse()), media_type="text/xml")
+        return Response(
+            content=str(MessagingResponse()), media_type="text/xml"
+        )
     except Exception as e:
         print(f"Webhook error: {e}")
-        return Response(content=str(MessagingResponse()), media_type="text/xml")
+        return Response(
+            content=str(MessagingResponse()), media_type="text/xml"
+        )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
