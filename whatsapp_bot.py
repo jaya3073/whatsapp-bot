@@ -698,12 +698,26 @@ def build_voice_reply(session):
     family_type = session.get("family_type", "family")
     name = session.get("name", "")
 
-    if budget >= 8000:
-        fees_text = "ఫీజు 5000 రూపాయలు. మొదట 800 రూపాయలు ఇవ్వాలి. అవి ఒక నెల వరకు వాడుకోవచ్చు."
-    else:
-        fees_text = "ఫీజు 4000 రూపాయలు. మొదట 800 రూపాయలు ఇవ్వాలి. అవి ఒక నెల వరకు వాడుకోవచ్చు."
-
     name_part = f" {name}" if name else ""
+
+    if budget >= 8000:
+        fees_text = (
+            "మా సర్వీస్ ఫీజు మొత్తం 5000 రూపాయలు. "
+            "అందులో మొదట 800 రూపాయలు ఇవ్వాలి. "
+            "మిగిలిన 4200 రూపాయలు ఇల్లు దొరికిన తర్వాత "
+            "అడ్వాన్స్ ఇచ్చేటప్పుడు ఇవ్వాలి. "
+            "ఈ 800 రూపాయలకి ఒక నెల వాలిడిటీ ఉంటుంది, "
+            "మీకు ఇల్లు దొరికేవరకు."
+        )
+    else:
+        fees_text = (
+            "మా సర్వీస్ ఫీజు మొత్తం 4000 రూపాయలు. "
+            "అందులో మొదట 800 రూపాయలు ఇవ్వాలి. "
+            "మిగిలిన 3200 రూపాయలు ఇల్లు దొరికిన తర్వాత "
+            "అడ్వాన్స్ ఇచ్చేటప్పుడు ఇవ్వాలి. "
+            "ఈ 800 రూపాయలకి ఒక నెల వాలిడిటీ ఉంటుంది, "
+            "మీకు ఇల్లు దొరికేవరకు."
+        )
 
     voice_text = (
         f"నమస్కారం{name_part}! "
@@ -776,6 +790,7 @@ async def whatsapp_webhook(request: Request):
         # ── If no text and no voice, send greeting ──
         if not message_text:
             send(from_number, GREETING)
+            send_voice_background(from_number, GREETING, lang)
             return Response(
                 content=str(MessagingResponse()), media_type="text/xml"
             )
@@ -809,18 +824,18 @@ async def whatsapp_webhook(request: Request):
         missing_msg = ask_missing_fields(session)
 
         if missing_msg:
-            # Still missing some fields — ask for them
+            # Still missing some fields — ask for them (text + voice)
             send(from_number, missing_msg)
+            send_voice_background(from_number, missing_msg, lang)
         else:
             # All fields collected — send complete response in ONE message
             response_text = build_complete_response(session)
             send(from_number, response_text)
             session["completed"] = True
 
-            # If voice was received, also send a voice reply
-            if is_voice:
-                voice_text = build_voice_reply(session)
-                send_voice_background(from_number, voice_text, lang)
+            # Voice note is COMPULSORY with every reply
+            voice_text = build_voice_reply(session)
+            send_voice_background(from_number, voice_text, lang)
 
         # ── Email notification to owner ──
         notify_owner_new_lead(from_number, message_text, session)
