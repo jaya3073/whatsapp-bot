@@ -57,6 +57,8 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 BASE_URL = os.getenv("BASE_URL", "https://whatsapp-bot-esy5.onrender.com")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
+WEBSITE_LINK = os.getenv("WEBSITE_LINK", "https://shivahouserentalagency.in/")
+CHANNEL_LINK = os.getenv("CHANNEL_LINK", "https://wa.me/c/918074915644")
 PROPERTIES_FILE = os.getenv("PROPERTIES_FILE", "properties.xlsx")
 PROPERTIES_SHEET_URL = os.getenv("PROPERTIES_SHEET_URL", "")
 AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY", "")
@@ -86,7 +88,9 @@ GREETING = (
 )
 
 FOOTER = (
-    f"\n\nOLX Ads: {OLX_LINK}\n"
+    f"\n\nWebsite: {WEBSITE_LINK}\n"
+    f"WhatsApp Channel: {CHANNEL_LINK}\n"
+    f"OLX Ads: {OLX_LINK}\n"
     f"YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
 )
@@ -697,7 +701,6 @@ def build_voice_reply(session):
     budget = session.get("budget", 6000)
     family_type = session.get("family_type", "family")
     name = session.get("name", "")
-
     name_part = f" {name}" if name else ""
 
     if budget >= 8000:
