@@ -1,16 +1,26 @@
-# whatsapp_bot.py — Shiva House Rental Agency (v2)
+# whatsapp_bot.py — Shiva House Rental Agency (v3)
 #
 # WhatsApp bot with guided conversation flow, Gemini-powered understanding,
 # voice note support, bachelors filtering, tiered fees, email alerts,
-# and duplicate-message protection.
+# duplicate-message protection, owner REPLY command, and opt-out.
+#
+# CHANGES IN v3 (compared to v2):
+#   1. Gemini reliability: retries + automatic fallback models
+#      (if GEMINI_MODEL fails with 503/timeout, tries gemini-2.5-flash,
+#       then gemini-2.0-flash) and a longer timeout (30s instead of 15s).
+#   2. Owner REPLY command restored: send "REPLY <number> <message>"
+#      from the owner phone to forward a message to a client.
+#   3. Opt-out restored: client sends "stop" -> opted out; any new
+#      message re-activates the conversation.
+#   4. Email alerts only once per conversation (was: every message).
 #
 # Required environment variables (set in Render -> Environment):
 #   TWILIO_ACCOUNT_SID
 #   TWILIO_AUTH_TOKEN
 #   TWILIO_WHATSAPP_FROM       (e.g. +14155238886)
-#   OWNER_WHATSAPP             (e.g. +918074915644)
+#   OWNER_WHATSAPP             (e.g. +918500701521)
 #   GEMINI_API_KEY
-#   GEMINI_MODEL               (default: gemini-flash-lite-latest)
+#   GEMINI_MODEL               (recommended now: gemini-2.5-flash)
 #   PROPERTIES_SHEET_URL       (CSV export link of your Google Sheet)
 #   BASE_URL                   (your Render URL for this bot)
 #   AZURE_SPEECH_KEY           (optional, for high-quality TTS)
@@ -53,7 +63,7 @@ client = Client(TWILIO_SID, TWILIO_TOKEN) if TWILIO_SID and TWILIO_TOKEN else No
 WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "+14155238886")
 OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918074915644")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 BASE_URL = os.getenv("BASE_URL", "https://whatsapp-bot-esy5.onrender.com")
 OLX_LINK = os.getenv("OLX_LINK", "https://www.olx.in/profile/129751503")
 YOUTUBE_LINK = os.getenv("YOUTUBE_LINK", "https://youtube.com/@shivahouserentalagency745/shorts")
@@ -69,6 +79,16 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 OWNER_EMAIL = os.getenv("OWNER_EMAIL", GMAIL_ADDRESS)
 
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
+
+
+def _gemini_model_list():
+    """Models to try, in order: configured model first, then fallbacks."""
+    models = []
+    for m in [GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.0-flash"]:
+        if m and m not in models:
+            models.append(m)
+    return models
+
 
 # ─── Constants ────────────────────────────────────────────────────────
 
@@ -93,6 +113,11 @@ FOOTER = (
     f"OLX Ads: {OLX_LINK}\n"
     f"YouTube: {YOUTUBE_LINK}\n\n"
     + CONTACTS_LINE
+)
+
+OPTED_OUT_MSG = (
+    "మీను మా సర్వీస్ నుంచి opt-out అయ్యారు. ✅\n"
+    "మళ్ళీ ఏమైనా అడగాలంటే 'hi' అని మెసేజ్ పంపండి."
 )
 
 
@@ -121,7 +146,7 @@ def get_fees_message(budget):
 
 # ─── Session Management ──────────────────────────────────────────────
 
-sessions = {}          # phone -> {name, count, budget, family_type, completed, last_sid, last_reply_time}
+sessions = {}          # phone -> {name, count, budget, family_type, completed, opted_out, notified, last_sid, last_reply_time}
 recent_sids = {}       # phone -> last MessageSid (dedup)
 audio_store = {}
 
@@ -134,6 +159,8 @@ def get_session(phone):
             "budget": None,
             "family_type": None,
             "completed": False,
+            "opted_out": False,
+            "notified": False,
         }
     return sessions[phone]
 
@@ -216,7 +243,11 @@ def notify_owner_new_lead(phone, message_text, session):
 # ─── Gemini AI Integration ───────────────────────────────────────────
 
 def call_gemini(prompt, audio_b64=None, audio_mime=None):
-    """Call Gemini API for text understanding or audio transcription."""
+    """Call Gemini API for text understanding or audio transcription.
+
+    v3: tries the configured model first; on failure (503, timeout, etc.)
+    retries once, then falls back to other models automatically.
+    """
     if not GEMINI_API_KEY:
         return None
 
@@ -229,11 +260,6 @@ def call_gemini(prompt, audio_b64=None, audio_mime=None):
             }
         })
 
-    model = GEMINI_MODEL
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={GEMINI_API_KEY}"
-    )
     payload = {
         "contents": [{"parts": parts}],
         "generationConfig": {
@@ -242,26 +268,39 @@ def call_gemini(prompt, audio_b64=None, audio_mime=None):
         },
     }
 
-    try:
-        req = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, timeout=15) as res:
-            result = json.loads(res.read().decode("utf-8"))
+    last_err = None
+    for model in _gemini_model_list():
+        for attempt in (1, 2):
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model}:generateContent?key={GEMINI_API_KEY}"
+            )
+            try:
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(req, timeout=30) as res:
+                    result = json.loads(res.read().decode("utf-8"))
 
-        text = (
-            result.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
-        return text.strip()
-    except Exception as e:
-        print(f"Gemini error: {e}")
-        return None
+                text = (
+                    result.get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                )
+                if text.strip():
+                    return text.strip()
+                last_err = "empty response"
+            except Exception as e:
+                last_err = e
+                print(f"Gemini error ({model}, attempt {attempt}): {e}")
+                time.sleep(1)
+
+    print(f"All Gemini models failed. Last error: {last_err}")
+    return None
 
 
 def extract_info_with_gemini(text, session):
@@ -736,7 +775,7 @@ def build_voice_reply(session):
 
 @app.get("/")
 def health():
-    return {"status": "ok", "service": "Shiva House Rental Agency Bot v2"}
+    return {"status": "ok", "service": "Shiva House Rental Agency Bot v3"}
 
 
 @app.get("/audio/{uid}")
@@ -770,6 +809,41 @@ async def whatsapp_webhook(request: Request):
             log_chat("IN", from_number, message_text)
 
         session = get_session(from_number)
+
+        # ── Owner REPLY command: REPLY <number> <message> ──
+        if OWNER_WHATSAPP and from_number == OWNER_WHATSAPP:
+            m = re.match(
+                r"^\s*REPLY\s+(\+?\d{10,14})\s+(.+)$",
+                message_text,
+                re.IGNORECASE | re.DOTALL,
+            )
+            if m:
+                target = m.group(1)
+                if not target.startswith("+"):
+                    target = "+" + target
+                reply_body = m.group(2).strip()
+                send(target, reply_body)
+                send(from_number, f"✅ Sent to {target}")
+                return Response(
+                    content=str(MessagingResponse()),
+                    media_type="text/xml",
+                )
+
+        # ── Opt-out: client sends "stop" ──
+        if message_text.lower().strip() in (
+            "stop", "unsubscribe", "స్టాప్",
+        ):
+            session["opted_out"] = True
+            send(from_number, OPTED_OUT_MSG)
+            return Response(
+                content=str(MessagingResponse()),
+                media_type="text/xml",
+            )
+
+        # If they opted out earlier but messaged again, re-activate
+        if session.get("opted_out"):
+            session["opted_out"] = False
+
         is_voice = False
         lang = "te"
 
@@ -795,7 +869,8 @@ async def whatsapp_webhook(request: Request):
             send(from_number, GREETING)
             send_voice_background(from_number, GREETING, lang)
             return Response(
-                content=str(MessagingResponse()), media_type="text/xml"
+                content=str(MessagingResponse()),
+                media_type="text/xml",
             )
 
         # ── Extract info from message ──
@@ -840,16 +915,20 @@ async def whatsapp_webhook(request: Request):
             voice_text = build_voice_reply(session)
             send_voice_background(from_number, voice_text, lang)
 
-        # ── Email notification to owner ──
-        notify_owner_new_lead(from_number, message_text, session)
+        # ── Email notification to owner (once per conversation) ──
+        if not session.get("notified"):
+            notify_owner_new_lead(from_number, message_text, session)
+            session["notified"] = True
 
         return Response(
-            content=str(MessagingResponse()), media_type="text/xml"
+            content=str(MessagingResponse()),
+            media_type="text/xml",
         )
     except Exception as e:
         print(f"Webhook error: {e}")
         return Response(
-            content=str(MessagingResponse()), media_type="text/xml"
+            content=str(MessagingResponse()),
+            media_type="text/xml",
         )
 
 
