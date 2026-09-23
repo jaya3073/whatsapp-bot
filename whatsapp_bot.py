@@ -1,26 +1,31 @@
-# whatsapp_bot.py — Shiva House Rental Agency (v3)
+# whatsapp_bot.py — Shiva House Rental Agency (v4)
 #
 # WhatsApp bot with guided conversation flow, Gemini-powered understanding,
 # voice note support, bachelors filtering, tiered fees, email alerts,
 # duplicate-message protection, owner REPLY command, and opt-out.
 #
-# CHANGES IN v3 (compared to v2):
-#   1. Gemini reliability: retries + automatic fallback models
-#      (if GEMINI_MODEL fails with 503/timeout, tries gemini-2.5-flash,
-#       then gemini-2.0-flash) and a longer timeout (30s instead of 15s).
-#   2. Owner REPLY command restored: send "REPLY <number> <message>"
-#      from the owner phone to forward a message to a client.
-#   3. Opt-out restored: client sends "stop" -> opted out; any new
-#      message re-activates the conversation.
-#   4. Email alerts only once per conversation (was: every message).
+# CHANGES IN v4 (compared to v3):
+#   1. MULTI-LANGUAGE: bot now replies in Telugu, English, Hindi, or Kannada
+#      (text + voice note). Gemini detects the client's language from each
+#      message (e.g. "I don't understand Telugu" -> switches to English).
+#   2. REPLY command fixed: 10-digit Indian numbers are now correctly sent
+#      to +91XXXXXXXXXX (before, "9704231053" became +970... = Palestine!).
+#      Spaces in the number are allowed. Owner gets success/failure feedback.
+#   3. NO REPEATS: full package (houses + fees + links) is sent only ONCE
+#      per client. Later messages get a short reply with contact numbers.
+#      If they ask for houses again, only the house list is re-sent
+#      (never the fees/links again).
+#   4. OWNER_WHATSAPP2 env var: a second owner number can also use REPLY.
+#   5. Sessions saved to sessions.json (best-effort) to survive restarts.
 #
 # Required environment variables (set in Render -> Environment):
 #   TWILIO_ACCOUNT_SID
 #   TWILIO_AUTH_TOKEN
 #   TWILIO_WHATSAPP_FROM       (e.g. +14155238886)
-#   OWNER_WHATSAPP             (e.g. +918500701521)
+#   OWNER_WHATSAPP             (e.g. +918074915644)
+#   OWNER_WHATSAPP2            (optional second owner number, e.g. +918500701521)
 #   GEMINI_API_KEY
-#   GEMINI_MODEL               (recommended now: gemini-2.5-flash)
+#   GEMINI_MODEL               (recommended: gemini-2.5-flash)
 #   PROPERTIES_SHEET_URL       (CSV export link of your Google Sheet)
 #   BASE_URL                   (your Render URL for this bot)
 #   AZURE_SPEECH_KEY           (optional, for high-quality TTS)
@@ -62,6 +67,7 @@ client = Client(TWILIO_SID, TWILIO_TOKEN) if TWILIO_SID and TWILIO_TOKEN else No
 
 WHATSAPP_FROM = os.getenv("TWILIO_WHATSAPP_FROM", "+14155238886")
 OWNER_WHATSAPP = os.getenv("OWNER_WHATSAPP", "+918074915644")
+OWNER_WHATSAPP2 = os.getenv("OWNER_WHATSAPP2", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 BASE_URL = os.getenv("BASE_URL", "https://whatsapp-bot-esy5.onrender.com")
@@ -80,6 +86,8 @@ OWNER_EMAIL = os.getenv("OWNER_EMAIL", GMAIL_ADDRESS)
 
 SHEET_WEBHOOK_URL = os.getenv("SHEET_WEBHOOK_URL", "")
 
+LANGS = ("te", "en", "hi", "kn")
+
 
 def _gemini_model_list():
     """Models to try, in order: configured model first, then fallbacks."""
@@ -90,65 +98,341 @@ def _gemini_model_list():
     return models
 
 
-# ─── Constants ────────────────────────────────────────────────────────
+# ─── Multi-language message texts ─────────────────────────────────────
 
-CONTACTS_LINE = (
-    "📞Contact : Shiva 8500701521, 8074915644 "
-    "(OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
-)
+CONTACT_NUMBERS = "Shiva 8500701521, 8074915644"
 
-GREETING = (
-    "నమస్కారం! శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
-    "దయచేసి కింది వివరాలు పంపండి:\n"
-    "1. మీ పేరు\n"
-    "2. ఎంతమంది ఉంటారు\n"
-    "3. ఎంత రెంట్లో చూస్తున్నారు\n"
-    "4. ఫ్యామిలీనా / బ్యాచిలర్స్?\n\n"
-    "voice note ద్వారా కూడా నాతో మాట్లాడవచ్చు మీ భాషలో 🎙️"
-)
+GREETING = {
+    "te": (
+        "నమస్కారం! శివ హౌస్ రెంటల్ ఏజెన్సీ 🏡\n"
+        "దయచేసి కింది వివరాలు పంపండి:\n"
+        "1. మీ పేరు\n"
+        "2. ఎంతమంది ఉంటారు\n"
+        "3. ఎంత రెంట్లో చూస్తున్నారు\n"
+        "4. ఫ్యామిలీనా / బ్యాచిలర్స్?\n\n"
+        "voice note ద్వారా కూడా నాతో మాట్లాడవచ్చు మీ భాషలో 🎙️"
+    ),
+    "en": (
+        "Hello! Shiva House Rental Agency 🏡\n"
+        "Please send these details:\n"
+        "1. Your name\n"
+        "2. How many people will stay\n"
+        "3. Your budget (rent)\n"
+        "4. Family or Bachelors?\n\n"
+        "You can also talk to me by voice note in your language 🎙️"
+    ),
+    "hi": (
+        "नमस्ते! शिवा हाउस रेंटल एजेंसी 🏡\n"
+        "कृपया ये जानकारी भेजें:\n"
+        "1. आपका नाम\n"
+        "2. कितने लोग रहेंगे\n"
+        "3. आपका बजट (किराया)\n"
+        "4. फैमिली या बैचलर्स?\n\n"
+        "आप अपनी भाषा में वॉइस नोट भी भेज सकते हैं 🎙️"
+    ),
+    "kn": (
+        "ನಮಸ್ಕಾರ! ಶಿವ ಹೌಸ್ ರೆಂಟಲ್ ಏಜೆನ್ಸಿ 🏡\n"
+        "ದಯವಿಟ್ಟು ಈ ಮಾಹಿತಿಯನ್ನು ಕಳುಹಿಸಿ:\n"
+        "1. ನಿಮ್ಮ ಹೆಸರು\n"
+        "2. ಎಷ್ಟು ಜನ ಇರುತ್ತಾರೆ\n"
+        "3. ನಿಮ್ಮ ಬಜೆಟ್ (ಬಾಡಿಗೆ)\n"
+        "4. ಫ್ಯಾಮಿಲಿ ಅಥವಾ ಬ್ಯಾಚುಲರ್ಸ್?\n\n"
+        "ನಿಮ್ಮ ಭಾಷೆಯಲ್ಲಿ ವಾಯ್ಸ್ ನೋಟ್ ಕಳುಹಿಸಬಹುದು 🎙️"
+    ),
+}
 
-FOOTER = (
-    f"\n\nWebsite: {WEBSITE_LINK}\n"
-    f"WhatsApp Channel: {CHANNEL_LINK}\n"
-    f"OLX Ads: {OLX_LINK}\n"
-    f"YouTube: {YOUTUBE_LINK}\n\n"
-    + CONTACTS_LINE
-)
+FOOTER = {
+    "te": (
+        f"\n\nWebsite: {WEBSITE_LINK}\n"
+        f"WhatsApp Channel: {CHANNEL_LINK}\n"
+        f"OLX Ads: {OLX_LINK}\n"
+        f"YouTube: {YOUTUBE_LINK}\n\n"
+        f"📞Contact : {CONTACT_NUMBERS} "
+        "(OLX links open కావాలంటే ఈ నంబర్లను మీ phone contacts లో save చేసుకోండి) ✅"
+    ),
+    "en": (
+        f"\n\nWebsite: {WEBSITE_LINK}\n"
+        f"WhatsApp Channel: {CHANNEL_LINK}\n"
+        f"OLX Ads: {OLX_LINK}\n"
+        f"YouTube: {YOUTUBE_LINK}\n\n"
+        f"📞Contact: {CONTACT_NUMBERS} "
+        "(please save these numbers in your phone contacts to open the OLX links) ✅"
+    ),
+    "hi": (
+        f"\n\nWebsite: {WEBSITE_LINK}\n"
+        f"WhatsApp Channel: {CHANNEL_LINK}\n"
+        f"OLX Ads: {OLX_LINK}\n"
+        f"YouTube: {YOUTUBE_LINK}\n\n"
+        f"📞संपर्क: {CONTACT_NUMBERS} "
+        "(OLX लिंक खोलने के लिए इन नंबरों को अपने फोन कॉन्टैक्ट में सेव करें) ✅"
+    ),
+    "kn": (
+        f"\n\nWebsite: {WEBSITE_LINK}\n"
+        f"WhatsApp Channel: {CHANNEL_LINK}\n"
+        f"OLX Ads: {OLX_LINK}\n"
+        f"YouTube: {YOUTUBE_LINK}\n\n"
+        f"📞ಸಂಪರ್ಕ: {CONTACT_NUMBERS} "
+        "(OLX ಲಿಂಕ್ ತೆರೆಯಲು ಈ ಸಂಖ್ಯೆಗಳನ್ನು ನಿಮ್ಮ ಫೋನ್ ಸಂಪರ್ಕಗಳಲ್ಲಿ ಉಳಿಸಿ) ✅"
+    ),
+}
 
-OPTED_OUT_MSG = (
-    "మీను మా సర్వీస్ నుంచి opt-out అయ్యారు. ✅\n"
-    "మళ్ళీ ఏమైనా అడగాలంటే 'hi' అని మెసేజ్ పంపండి."
-)
+OPTED_OUT_MSG = {
+    "te": "మీను మా సర్వీస్ నుంచి opt-out అయ్యారు. ✅ మళ్ళీ ఏమైనా అడగాలంటే 'hi' అని మెసేజ్ పంపండి.",
+    "en": "You have been opted out of our service. ✅ To talk again, just send 'hi'.",
+    "hi": "आप हमारी सेवा से बाहर हो गए हैं। ✅ फिर बात करने के लिए 'hi' भेजें।",
+    "kn": "ನೀವು ನಮ್ಮ ಸೇವೆಯಿಂದ ಹೊರಗಿದ್ದೀರಿ. ✅ ಮತ್ತೆ ಮಾತನಾಡಲು 'hi' ಕಳುಹಿಸಿ.",
+}
+
+SHORT_REPLY = {
+    "te": (
+        "మీ వివరాలు నమోదయ్యాయి ✅\n"
+        "ఫీజు వివరాలు మరియు లింక్స్ ముందే పంపాం.\n"
+        "ఇంకేదైనా సమాచారం కావాలంటే అడగండి. "
+        f"డైరెక్ట్ మాట కావాలంటే: {CONTACT_NUMBERS}"
+    ),
+    "en": (
+        "Your details are saved ✅\n"
+        "Fees details and links were already sent earlier.\n"
+        "Ask me if you need anything else. "
+        f"To talk directly: {CONTACT_NUMBERS}"
+    ),
+    "hi": (
+        "आपकी जानकारी दर्ज हो गई है ✅\n"
+        "फीस और लिंक पहले ही भेज दिए गए हैं।\n"
+        "कुछ और चाहिए तो पूछें। "
+        f"सीधे बात करने के लिए: {CONTACT_NUMBERS}"
+    ),
+    "kn": (
+        "ನಿಮ್ಮ ವಿವರಗಳು ದಾಖಲಾಗಿವೆ ✅\n"
+        "ಶುಲ್ಕ ವಿವರ ಮತ್ತು ಲಿಂಕ್‌ಗಳನ್ನು ಈಗಾಗಲೇ ಕಳುಹಿಸಲಾಗಿದೆ.\n"
+        "ಬೇರೇನಾದರೂ ಬೇಕಿದ್ದರೆ ಕೇಳಿ. "
+        f"ನೇರವಾಗಿ ಮಾತನಾಡಲು: {CONTACT_NUMBERS}"
+    ),
+}
+
+HOUSE_HEADER = {
+    "te": "మీ బడ్జెట్ ప్రకారం కింది ఇళ్లు అందుబాటులో ఉన్నాయి:\n\n",
+    "en": "According to your budget, these houses are available:\n\n",
+    "hi": "आपके बजट के अनुसार ये घर उपलब्ध हैं:\n\n",
+    "kn": "ನಿಮ್ಮ ಬಜೆಟ್‌ಗೆ ಅನುಗುಣವಾಗಿ ಈ ಮನೆಗಳು ಲಭ್ಯವಿವೆ:\n\n",
+}
+
+HOUSE_NONE = {
+    "te": "మీ బడ్జెట్ ప్రకారం ప్రస్తుతం ఇళ్లు అందుబాటులో లేవు. త్వరలో అప్డేట్ చేస్తాం.",
+    "en": "No houses available in your budget right now. We will update soon.",
+    "hi": "आपके बजट में अभी कोई घर उपलब्ध नहीं है। हम जल्द अपडेट करेंगे।",
+    "kn": "ನಿಮ್ಮ ಬಜೆಟ್‌ನಲ್ಲಿ ಸದ್ಯಕ್ಕೆ ಮನೆಗಳಿಲ್ಲ. ಶೀಘ್ರದಲ್ಲೇ ಅಪ್‌ಡೇಟ್ ಮಾಡುತ್ತೇವೆ.",
+}
+
+GREET_LINE = {
+    "te": "నమస్కారం {name}! 🏡\n\n",
+    "en": "Hello {name}! 🏡\n\n",
+    "hi": "नमस्ते {name}! 🏡\n\n",
+    "kn": "ನಮಸ್ಕಾರ {name}! 🏡\n\n",
+}
+
+MISSING_LABELS = {
+    "te": {"name": "మీ పేరు", "count": "ఎంతమంది ఉంటారు", "budget": "ఎంత రెంట్లో చూస్తున్నారు", "ftype": "ఫ్యామిలీనా / బ్యాచిలర్స్", "ask": "దయచేసి ఇంకా ఈ వివరాలు పంపండి:\n"},
+    "en": {"name": "Your name", "count": "How many people will stay", "budget": "Your budget (rent)", "ftype": "Family or Bachelors?", "ask": "Please also send these details:\n"},
+    "hi": {"name": "आपका नाम", "count": "कितने लोग रहेंगे", "budget": "आपका बजट (किराया)", "ftype": "फैमिली या बैचलर्स?", "ask": "कृपया ये जानकारी भी भेजें:\n"},
+    "kn": {"name": "ನಿಮ್ಮ ಹೆಸರು", "count": "ಎಷ್ಟು ಜನ ಇರುತ್ತಾರೆ", "budget": "ನಿಮ್ಮ ಬಜೆಟ್ (ಬಾಡಿಗೆ)", "ftype": "ಫ್ಯಾಮಿಲಿ ಅಥವಾ ಬ್ಯಾಚುಲರ್ಸ್?", "ask": "ದಯವಿಟ್ಟು ಈ ಮಾಹಿತಿಯನ್ನು ಸಹ ಕಳುಹಿಸಿ:\n"},
+}
+
+MISSING_SINGLE = {
+    "te": {"name": "మీ పేరు ఏమిటి?", "count": "ఎంతమంది ఉంటారు?", "budget": "ఎంత రెంట్లో చూస్తున్నారు?", "ftype": "ఫ్యామిలీనా / బ్యాచిలర్స్?"},
+    "en": {"name": "What is your name?", "count": "How many people will stay?", "budget": "What is your budget?", "ftype": "Family or Bachelors?"},
+    "hi": {"name": "आपका नाम क्या है?", "count": "कितने लोग रहेंगे?", "budget": "आपका बजट कितना है?", "ftype": "फैमिली या बैचलर्स?"},
+    "kn": {"name": "ನಿಮ್ಮ ಹೆಸರು ಏನು?", "count": "ಎಷ್ಟು ಜನ ಇರುತ್ತಾರೆ?", "budget": "ನಿಮ್ಮ ಬಜೆಟ್ ಎಷ್ಟು?", "ftype": "ಫ್ಯಾಮಿಲಿ ಅಥವಾ ಬ್ಯಾಚುಲರ್ಸ್?"},
+}
 
 
-def get_fees_message(budget):
-    """Return the fees message based on budget threshold."""
+def get_fees_message(budget, lang="te"):
+    """Return the fees message based on budget threshold, in the client's language."""
     if budget >= 8000:
-        return (
-            "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మాది service ఉంటుంది. "
-            "మీ బడ్జెట్ లో 3 or 5 houses చూపిస్తాము. "
-            "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. "
-            "5000 ఉంటుంది. 5000 లో ఇనిషియల్ గా 800 తీసుకుంటాము. "
-            "రూమ్స్ అన్నీ చూపిస్తాము. మీరు రూమ్ కి అడ్వాన్స్ ఇచ్చేటప్పుడు 4200 ఇవ్వాల్సి ఉంటుంది. "
-            "Total 5000.\n"
-            "Note: మీరు ఇచ్చే 800 కి 1 month validity ఉంటుంది. మీకు ఇల్లు దొరికేవరకు."
-        )
+        fees = {
+            "te": (
+                "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మాది service ఉంటుంది. "
+                "మీ బడ్జెట్ లో 3 or 5 houses చూపిస్తాము. "
+                "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. "
+                "5000 ఉంటుంది. 5000 లో ఇనిషియల్ గా 800 తీసుకుంటాము. "
+                "రూమ్స్ అన్నీ చూపిస్తాము. మీరు రూమ్ కి అడ్వాన్స్ ఇచ్చేటప్పుడు 4200 ఇవ్వాల్సి ఉంటుంది. "
+                "Total 5000.\n"
+                "Note: మీరు ఇచ్చే 800 కి 1 month validity ఉంటుంది. మీకు ఇల్లు దొరికేవరకు."
+            ),
+            "en": (
+                "We are a rental agency, not owners. "
+                "We will show you 3 or 5 houses within your budget. "
+                "We charge a service fee for getting you the house: "
+                "Rs.5000 total. Rs.800 is collected initially. "
+                "We show you all the rooms. The remaining Rs.4200 is due "
+                "when you pay the advance for the room. Total 5000.\n"
+                "Note: The Rs.800 you pay has 1 month validity, until you find a house."
+            ),
+            "hi": (
+                "हम मालिक नहीं, रेंटल एजेंसी हैं। "
+                "आपके बजट में 3 या 5 घर दिखाएंगे। "
+                "घर दिलाने के लिए सर्विस फी लगती है: "
+                "कुल ₹5000। शुरू में ₹800 लेते हैं। "
+                "सारे कमरे दिखाते हैं। बाकी ₹4200 कमरे का अग्रिम (एडवांस) "
+                "देते समय देना होगा। कुल 5000।\n"
+                "नोट: ₹800 की वैधता 1 महीने की है, तब तक जब तक आपको घर मिल जाए।"
+            ),
+            "kn": (
+                "ನಾವು ಮಾಲೀಕರಲ್ಲ, ರೆಂಟಲ್ ಏಜೆನ್ಸಿ. "
+                "ನಿಮ್ಮ ಬಜೆಟ್‌ನಲ್ಲಿ 3 ಅಥವಾ 5 ಮನೆಗಳನ್ನು ತೋರಿಸುತ್ತೇವೆ. "
+                "ಮನೆ ದೊರಕಿಸಿದ್ದಕ್ಕೆ ಸರ್ವಿಸ್ ಶುಲ್ಕ ಇರುತ್ತದೆ: "
+                "ಒಟ್ಟು ₹5000. ಆರಂಭದಲ್ಲಿ ₹800 ತೆಗೆದುಕೊಳ್ಳುತ್ತೇವೆ. "
+                "ಎಲ್ಲಾ ಕೋಣೆಗಳನ್ನು ತೋರಿಸುತ್ತೇವೆ. ಉಳಿದ ₹4200 ಅನ್ನು ಕೋಣೆಯ ಅಡ್ವಾನ್ಸ್ "
+                "ನೀಡುವಾಗ ನೀಡಬೇಕು. ಒಟ್ಟು 5000.\n"
+                "ಗಮನಿಸಿ: ₹800 ಗೆ 1 ತಿಂಗಳ ಮಾನ್ಯತೆ ಇದೆ, ನಿಮಗೆ ಮನೆ ಸಿಗುವವರೆಗೆ."
+            ),
+        }
     else:
-        return (
-            "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మాది service ఉంటుంది. "
-            "మీ బడ్జెట్ లో 3 or 5 houses చూపిస్తాము. "
-            "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. "
-            "4000 ఉంటుంది. First 800 pay చెయ్యాలి. రూమ్స్ అన్నీ చూపిస్తాము. "
-            "తర్వాత మీరు room కి advance ఇచ్చేటప్పుడు 3200.\n"
-            "Note: మీరు ఇచ్చే 800 కి 1 month validity ఉంటుంది. మీకు ఇల్లు దొరికేవరకు."
-        )
+        fees = {
+            "te": (
+                "మేము ఓనర్స్ కాదు, రెంటల్ ఏజెన్సీ. మాది service ఉంటుంది. "
+                "మీ బడ్జెట్ లో 3 or 5 houses చూపిస్తాము. "
+                "ఇల్లు ఇప్పిస్తాము. ఇప్పించినందుకు ఫీజు ఛార్జ్ చేస్తాము. "
+                "4000 ఉంటుంది. First 800 pay చెయ్యాలి. రూమ్స్ అన్నీ చూపిస్తాము. "
+                "తర్వాత మీరు room కి advance ఇచ్చేటప్పుడు 3200.\n"
+                "Note: మీరు ఇచ్చే 800 కి 1 month validity ఉంటుంది. మీకు ఇల్లు దొరికేవరకు."
+            ),
+            "en": (
+                "We are a rental agency, not owners. "
+                "We will show you 3 or 5 houses within your budget. "
+                "We charge a service fee for getting you the house: "
+                "Rs.4000 total. First you pay Rs.800. "
+                "We show you all the rooms. Then, when you pay the advance "
+                "for the room, you pay the remaining Rs.3200.\n"
+                "Note: The Rs.800 you pay has 1 month validity, until you find a house."
+            ),
+            "hi": (
+                "हम मालिक नहीं, रेंटल एजेंसी हैं। "
+                "आपके बजट में 3 या 5 घर दिखाएंगे। "
+                "घर दिलाने के लिए सर्विस फी लगती है: "
+                "कुल ₹4000। पहले ₹800 देना है। "
+                "सारे कमरे दिखाते हैं। फिर कमरे का अग्रिम देते समय बाकी ₹3200 दें।\n"
+                "नोट: ₹800 की वैधता 1 महीने की है, तब तक जब तक आपको घर मिल जाए।"
+            ),
+            "kn": (
+                "ನಾವು ಮಾಲೀಕರಲ್ಲ, ರೆಂಟಲ್ ಏಜೆನ್ಸಿ. "
+                "ನಿಮ್ಮ ಬಜೆಟ್‌ನಲ್ಲಿ 3 ಅಥವಾ 5 ಮನೆಗಳನ್ನು ತೋರಿಸುತ್ತೇವೆ. "
+                "ಮನೆ ದೊರಕಿಸಿದ್ದಕ್ಕೆ ಸರ್ವಿಸ್ ಶುಲ್ಕ ಇರುತ್ತದೆ: "
+                "ಒಟ್ಟು ₹4000. ಮೊದಲು ₹800 ನೀಡಬೇಕು. "
+                "ಎಲ್ಲಾ ಕೋಣೆಗಳನ್ನು ತೋರಿಸುತ್ತೇವೆ. ನಂತರ ಕೋಣೆಯ ಅಡ್ವಾನ್ಸ್ ನೀಡುವಾಗ ಉಳಿದ ₹3200 ನೀಡಿ.\n"
+                "ಗಮನಿಸಿ: ₹800 ಗೆ 1 ತಿಂಗಳ ಮಾನ್ಯತೆ ಇದೆ, ನಿಮಗೆ ಮನೆ ಸಿಗುವವರೆಗೆ."
+            ),
+        }
+    return fees.get(lang, fees["te"])
+
+
+VOICE_FEES_HIGH = {
+    "te": (
+        "మా సర్వీస్ ఫీజు మొత్తం 5000 రూపాయలు. "
+        "అందులో మొదట 800 రూపాయలు ఇవ్వాలి. "
+        "మిగిలిన 4200 రూపాయలు ఇల్లు దొరికిన తర్వాత "
+        "అడ్వాన్స్ ఇచ్చేటప్పుడు ఇవ్వాలి. "
+        "ఈ 800 రూపాయలకి ఒక నెల వాలిడిటీ ఉంటుంది, "
+        "మీకు ఇల్లు దొరికేవరకు."
+    ),
+    "en": (
+        "Our service fee is 5000 rupees total. "
+        "First you pay 800 rupees. "
+        "The remaining 4200 rupees is due when you pay the advance "
+        "after finding the house. "
+        "The 800 rupees has one month validity, "
+        "until you find a house."
+    ),
+    "hi": (
+        "हमारी सर्विस फी कुल 5000 रुपये है। "
+        "पहले 800 रुपये देना है। "
+        "बाकी 4200 रुपये घर मिलने के बाद "
+        "अग्रिम देते समय देना है। "
+        "इन 800 रुपये की वैधता एक महीने की है, "
+        "घर मिलने तक।"
+    ),
+    "kn": (
+        "ನಮ್ಮ ಸರ್ವಿಸ್ ಶುಲ್ಕ ಒಟ್ಟು 5000 ರೂಪಾಯಿ. "
+        "ಮೊದಲು 800 ರೂಪಾಯಿ ನೀಡಬೇಕು. "
+        "ಉಳಿದ 4200 ರೂಪಾಯಿ ಮನೆ ಸಿಕ್ಕ ನಂತರ "
+        "ಅಡ್ವಾನ್ಸ್ ನೀಡುವಾಗ ನೀಡಬೇಕು. "
+        "ಈ 800 ರೂಪಾಯಿಗೆ ಒಂದು ತಿಂಗಳ ಮಾನ್ಯತೆ ಇದೆ, "
+        "ಮನೆ ಸಿಗುವವರೆಗೆ."
+    ),
+}
+
+VOICE_FEES_LOW = {
+    "te": (
+        "మా సర్వీస్ ఫీజు మొత్తం 4000 రూపాయలు. "
+        "అందులో మొదట 800 రూపాయలు ఇవ్వాలి. "
+        "మిగిలిన 3200 రూపాయలు ఇల్లు దొరికిన తర్వాత "
+        "అడ్వాన్స్ ఇచ్చేటప్పుడు ఇవ్వాలి. "
+        "ఈ 800 రూపాయలకి ఒక నెల వాలిడిటీ ఉంటుంది, "
+        "మీకు ఇల్లు దొరికేవరకు."
+    ),
+    "en": (
+        "Our service fee is 4000 rupees total. "
+        "First you pay 800 rupees. "
+        "The remaining 3200 rupees is due when you pay the advance "
+        "after finding the house. "
+        "The 800 rupees has one month validity, "
+        "until you find a house."
+    ),
+    "hi": (
+        "हमारी सर्विस फी कुल 4000 रुपये है। "
+        "पहले 800 रुपये देना है। "
+        "बाकी 3200 रुपये घर मिलने के बाद "
+        "अग्रिम देते समय देना है। "
+        "इन 800 रुपये की वैधता एक महीने की है, "
+        "घर मिलने तक।"
+    ),
+    "kn": (
+        "ನಮ್ಮ ಸರ್ವಿಸ್ ಶುಲ್ಕ ಒಟ್ಟು 4000 ರೂಪಾಯಿ. "
+        "ಮೊದಲು 800 ರೂಪಾಯಿ ನೀಡಬೇಕು. "
+        "ಉಳಿದ 3200 ರೂಪಾಯಿ ಮನೆ ಸಿಕ್ಕ ನಂತರ "
+        "ಅಡ್ವಾನ್ಸ್ ನೀಡುವಾಗ ನೀಡಬೇಕು. "
+        "ಈ 800 ರೂಪಾಯಿಗೆ ಒಂದು ತಿಂಗಳ ಮಾನ್ಯತೆ ಇದೆ, "
+        "ಮನೆ ಸಿಗುವವರೆಗೆ."
+    ),
+}
+
+# Keywords that mean "show me the houses/links again"
+HOUSE_KEYWORDS = [
+    "ఇల్లు", "ఇళ్లు", "లింక్", "లింక్స్", "చూపించు",
+    "house", "houses", "link", "links", "room", "rooms", "show",
+    "घर", "लिंक", "कमरा",
+    "ಮನೆ", "ಲಿಂಕ್", "ಕೋಣೆ",
+]
 
 
 # ─── Session Management ──────────────────────────────────────────────
 
-sessions = {}          # phone -> {name, count, budget, family_type, completed, opted_out, notified, last_sid, last_reply_time}
+SESSIONS_FILE = "sessions.json"
+sessions = {}          # phone -> {name, count, budget, family_type, completed, opted_out, notified, lang, full_sent}
 recent_sids = {}       # phone -> last MessageSid (dedup)
 audio_store = {}
+
+
+def load_sessions():
+    global sessions
+    try:
+        if os.path.exists(SESSIONS_FILE):
+            with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
+                sessions = json.load(f)
+            print(f"Loaded {len(sessions)} sessions from disk")
+    except Exception as e:
+        print("Session load error:", e)
+
+
+def save_sessions():
+    try:
+        with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
+            json.dump(sessions, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+load_sessions()
 
 
 def get_session(phone):
@@ -161,8 +445,16 @@ def get_session(phone):
             "completed": False,
             "opted_out": False,
             "notified": False,
+            "lang": "te",
+            "full_sent": False,
         }
-    return sessions[phone]
+    # ensure new keys exist on old sessions
+    s = sessions[phone]
+    s.setdefault("lang", "te")
+    s.setdefault("full_sent", False)
+    s.setdefault("opted_out", False)
+    s.setdefault("notified", False)
+    return s
 
 
 # ─── Google Sheets Utilities ─────────────────────────────────────────
@@ -245,8 +537,7 @@ def notify_owner_new_lead(phone, message_text, session):
 def call_gemini(prompt, audio_b64=None, audio_mime=None):
     """Call Gemini API for text understanding or audio transcription.
 
-    v3: tries the configured model first; on failure (503, timeout, etc.)
-    retries once, then falls back to other models automatically.
+    Retries on failure and automatically falls back to other models.
     """
     if not GEMINI_API_KEY:
         return None
@@ -304,7 +595,7 @@ def call_gemini(prompt, audio_b64=None, audio_mime=None):
 
 
 def extract_info_with_gemini(text, session):
-    """Extract name, count, budget, accommodation_type from client message."""
+    """Extract name, count, budget, accommodation_type AND language."""
     current = (
         f"name={session.get('name')}, count={session.get('count')}, "
         f"budget={session.get('budget')}, type={session.get('family_type')}"
@@ -320,7 +611,13 @@ def extract_info_with_gemini(text, session):
         '  "name": string (client name)\n'
         '  "count": integer (number of people)\n'
         '  "budget": integer (rent in rupees, e.g. 5000)\n'
-        '  "accommodation_type": "family" or "bachelors"\n\n'
+        '  "accommodation_type": "family" or "bachelors"\n'
+        '  "lang": "te" or "en" or "hi" or "kn" -- the language the client '
+        "wants to converse in. te=Telugu, en=English, hi=Hindi, kn=Kannada. "
+        "If the client asks to change language (for example 'I don't "
+        "understand Telugu, speak English'), set lang to the requested "
+        "language. Romanized Telugu (Telugu typed in English letters) "
+        "should be \"te\".\n\n"
         "Return ONLY the JSON, no other text."
     )
 
@@ -355,13 +652,13 @@ def extract_info_regex(text):
 
     # Accommodation type
     lower = text.lower()
-    if "bachelor" in lower or "bachelors" in lower:
+    if "bachelor" in lower:
         info["accommodation_type"] = "bachelors"
     elif "family" in lower:
         info["accommodation_type"] = "family"
 
     # Count: look for patterns like "3 members", "2 people", "4 మంది"
-    count_match = re.search(r"(\d+)\s*(?:members?|people|మంది|persons?)", lower)
+    count_match = re.search(r"(\d+)\s*(?:members?|people|మంದಿ|persons?|ಜನ)", lower)
     if count_match:
         info["count"] = int(count_match.group(1))
     else:
@@ -379,19 +676,40 @@ def transcribe_audio(audio_data, mime_type):
 
     prompt = (
         "Transcribe this audio message. The language may be Telugu, Hindi, "
-        "or English. Return ONLY the transcribed text, nothing else."
+        "Kannada, or English. Return ONLY the transcribed text, nothing else."
     )
 
     result = call_gemini(prompt, audio_b64=audio_b64, audio_mime=mime_type)
     return result if result else ""
 
 
+# ─── Language detection ──────────────────────────────────────────────
+
+def detect_language(text):
+    """Script-based language detection (fallback when Gemini is unavailable).
+
+    Returns "te", "hi", "kn" based on script, or None if unclear
+    (latin text -> let the session language stay as-is).
+    """
+    telugu_chars = sum(1 for c in text if "\u0c00" <= c <= "\u0c7f")
+    hindi_chars = sum(1 for c in text if "\u0900" <= c <= "\u097f")
+    kannada_chars = sum(1 for c in text if "\u0c80" <= c <= "\u0cff")
+    if telugu_chars > 3:
+        return "te"
+    if hindi_chars > 3:
+        return "hi"
+    if kannada_chars > 3:
+        return "kn"
+    return None
+
+
 # ─── WhatsApp Send ────────────────────────────────────────────────────
 
 def send(to, body, media_url=None):
+    """Send a WhatsApp message. Returns True on success, False on failure."""
     if not client:
         print("Twilio client is not configured.")
-        return
+        return False
     try:
         kwargs = {
             "from_": f"whatsapp:{WHATSAPP_FROM}",
@@ -406,8 +724,10 @@ def send(to, body, media_url=None):
         print(f"Sent: {message.sid}")
         if body:
             log_chat("OUT", to, body)
+        return True
     except Exception as e:
-        print(f"Send error: {e}")
+        print(f"Send error to {to}: {e}")
+        return False
 
 
 def download_twilio_media(media_url):
@@ -425,6 +745,42 @@ def download_twilio_media(media_url):
     except Exception as e:
         print(f"Media download error: {e}")
         return None
+
+
+# ─── Owner helpers ───────────────────────────────────────────────────
+
+def _digits(number):
+    return re.sub(r"\D", "", number or "")
+
+
+def is_owner(number):
+    """Check if the sender is one of the owner numbers (last 10 digits match)."""
+    n = _digits(number)
+    if len(n) < 10:
+        return False
+    for candidate in (OWNER_WHATSAPP, OWNER_WHATSAPP2):
+        c = _digits(candidate)
+        if len(c) >= 10 and n[-10:] == c[-10:]:
+            return True
+    return False
+
+
+def normalize_client_number(raw):
+    """Normalize a client number typed in the REPLY command.
+
+    10-digit Indian mobile (e.g. 9704231053) -> +919704231053
+    """
+    digits = _digits(raw)
+    if len(digits) == 10 and digits[0] in "6789":
+        return "+91" + digits
+    if len(digits) == 11 and digits.startswith("0"):
+        return "+91" + digits[1:]
+    if len(digits) == 12 and digits.startswith("91"):
+        return "+" + digits
+    if len(digits) >= 12:
+        return "+" + digits
+    # Too short / unclear — return as-is with +
+    return "+" + digits
 
 
 # ─── Property Search ─────────────────────────────────────────────────
@@ -502,10 +858,7 @@ def quick_property_search(budget, family_type="family"):
         if family_type == "bachelors":
             df = filter_bachelors(df)
             if df.empty:
-                return (
-                    "మీ అవసరానికి బ్యాచిలర్స్ అలవ్ అయ్యే ఇళ్లు "
-                    "ప్రస్తుతం అందుబాటులో లేవు. త్వరలో అప్డేట్ చేస్తాం."
-                )
+                return "NO_HOUSES_BACHELORS"
 
         # Budget filter
         budget_col = None
@@ -543,12 +896,21 @@ def quick_property_search(budget, family_type="family"):
         return None
 
 
+BACHELORS_NONE = {
+    "te": "మీ అవసరానికి బ్యాచిలర్స్ అలవ్ అయ్యే ఇళ్లు ప్రస్తుతం అందుబాటులో లేవు. త్వరలో అప్డేట్ చేస్తాం.",
+    "en": "No bachelor-friendly houses are available right now. We will update soon.",
+    "hi": "बैचलर्स के लिए घर अभी उपलब्ध नहीं हैं। हम जल्द अपडेट करेंगे।",
+    "kn": "ಬ್ಯಾಚುಲರ್‌ಗೆ ಮನೆಗಳು ಸದ್ಯಕ್ಕೆ ಲಭ್ಯವಿಲ್ಲ. ಶೀಘ್ರದಲ್ಲೇ ಅಪ್‌ಡೇಟ್ ಮಾಡುತ್ತೇವೆ.",
+}
+
+
 # ─── Text-to-Speech ──────────────────────────────────────────────────
 
 voice_map = {
     "te": "te-IN-ShrutiNeural",
     "hi": "hi-IN-SwaraNeural",
     "en": "en-IN-NeerjaNeural",
+    "kn": "kn-IN-SapnaNeural",
 }
 
 
@@ -652,130 +1014,135 @@ def strip_for_voice(text):
 
 # ─── Conversation Logic ──────────────────────────────────────────────
 
-def detect_language(text):
-    """Detect if message is Telugu, Hindi, or English."""
-    telugu_chars = sum(1 for c in text if "\u0c00" <= c <= "\u0c7f")
-    hindi_chars = sum(1 for c in text if "\u0900" <= c <= "\u097f")
-    if telugu_chars > 3:
-        return "te"
-    if hindi_chars > 3:
-        return "hi"
-    return "te"  # default to Telugu for this agency
-
-
-def ask_missing_fields(session):
+def ask_missing_fields(session, lang="te"):
     """Ask for whichever of the 4 fields are still missing."""
+    labels = MISSING_LABELS.get(lang, MISSING_LABELS["te"])
+    singles = MISSING_SINGLE.get(lang, MISSING_SINGLE["te"])
+
     missing = []
     if not session.get("name"):
-        missing.append("మీ పేరు")
+        missing.append("name")
     if not session.get("count"):
-        missing.append("ఎంతమంది ఉంటారు")
+        missing.append("count")
     if not session.get("budget"):
-        missing.append("ఎంత రెంట్లో చూస్తున్నారు")
+        missing.append("budget")
     if not session.get("family_type"):
-        missing.append("ఫ్యామిలీనా / బ్యాచిలర్స్")
+        missing.append("ftype")
 
     if not missing:
         return None
 
     if len(missing) == 4:
-        return GREETING
+        return GREETING.get(lang, GREETING["te"])
 
     if len(missing) == 1:
-        if "మీ పేరు" in missing[0]:
-            return "మీ పేరు ఏమిటి?"
-        if "ఎంతమంది" in missing[0]:
-            return "ఎంతమంది ఉంటారు?"
-        if "ఎంత రెంట్లో" in missing[0]:
-            return "ఎంత రెంట్లో చూస్తున్నారు?"
-        if "ఫ్యామిలీ" in missing[0]:
-            return "ఫ్యామిలీనా / బ్యాచిలర్స్?"
+        return singles[missing[0]]
 
     parts = []
     for i, m in enumerate(missing, 1):
-        parts.append(f"{i}. {m}")
-    return "దయచేసి ఇంకా ఈ వివరాలు పంపండి:\n" + "\n".join(parts)
+        parts.append(f"{i}. {labels[m]}")
+    return labels["ask"] + "\n".join(parts)
 
 
 def build_complete_response(session):
     """Build the single combined message with properties + fees + footer."""
+    lang = session.get("lang", "te")
     budget = session.get("budget", 6000)
     family_type = session.get("family_type", "family")
     name = session.get("name", "")
 
     properties_text = quick_property_search(budget, family_type)
-    fees_msg = get_fees_message(budget)
+    fees_msg = get_fees_message(budget, lang)
 
     # Greeting with name
-    if name:
-        greeting_line = f"నమస్కారం {name}! 🏡\n\n"
-    else:
-        greeting_line = "నమస్కారం! 🏡\n\n"
+    greeting_line = GREET_LINE.get(lang, GREET_LINE["te"]).format(
+        name=name if name else ""
+    )
 
     # Property results
-    if properties_text:
+    if properties_text == "NO_HOUSES_BACHELORS":
+        props_section = BACHELORS_NONE.get(lang, BACHELORS_NONE["te"]) + "\n\n"
+    elif properties_text:
         props_section = (
-            "మీ బడ్జెట్ ప్రకారం కింది ఇళ్లు అందుబాటులో ఉన్నాయి:\n\n"
-            f"{properties_text}\n"
+            HOUSE_HEADER.get(lang, HOUSE_HEADER["te"])
+            + f"{properties_text}\n"
         )
     else:
-        props_section = (
-            "మీ బడ్జెట్ ప్రకారం ప్రస్తుతం ఇళ్లు అందుబాటులో లేవు. "
-            "త్వరలో అప్డేట్ చేస్తాం.\n\n"
-        )
+        props_section = HOUSE_NONE.get(lang, HOUSE_NONE["te"]) + "\n\n"
 
     # Combine everything into ONE message
     full_response = (
         greeting_line
         + props_section
         + fees_msg
-        + FOOTER
+        + FOOTER.get(lang, FOOTER["te"])
     )
 
     return full_response
 
 
-def build_voice_reply(session):
-    """Build a voice-friendly version (no links, titles, or phone numbers)."""
+def build_house_only_response(session):
+    """Houses list WITHOUT fees and WITHOUT footer links (for repeat requests)."""
+    lang = session.get("lang", "te")
     budget = session.get("budget", 6000)
     family_type = session.get("family_type", "family")
+
+    properties_text = quick_property_search(budget, family_type)
+    if properties_text == "NO_HOUSES_BACHELORS":
+        return BACHELORS_NONE.get(lang, BACHELORS_NONE["te"])
+    if properties_text:
+        return (
+            HOUSE_HEADER.get(lang, HOUSE_HEADER["te"])
+            + f"{properties_text}\n"
+        )
+    return HOUSE_NONE.get(lang, HOUSE_NONE["te"])
+
+
+def build_voice_reply(session):
+    """Build a voice-friendly version (no links, titles, or phone numbers)."""
+    lang = session.get("lang", "te")
+    budget = session.get("budget", 6000)
     name = session.get("name", "")
     name_part = f" {name}" if name else ""
 
-    if budget >= 8000:
-        fees_text = (
-            "మా సర్వీస్ ఫీజు మొత్తం 5000 రూపాయలు. "
-            "అందులో మొదట 800 రూపాయలు ఇవ్వాలి. "
-            "మిగిలిన 4200 రూపాయలు ఇల్లు దొరికిన తర్వాత "
-            "అడ్వాన్స్ ఇచ్చేటప్పుడు ఇవ్వాలి. "
-            "ఈ 800 రూపాయలకి ఒక నెల వాలిడిటీ ఉంటుంది, "
-            "మీకు ఇల్లు దొరికేవరకు."
-        )
-    else:
-        fees_text = (
-            "మా సర్వీస్ ఫీజు మొత్తం 4000 రూపాయలు. "
-            "అందులో మొదట 800 రూపాయలు ఇవ్వాలి. "
-            "మిగిలిన 3200 రూపాయలు ఇల్లు దొరికిన తర్వాత "
-            "అడ్వాన్స్ ఇచ్చేటప్పుడు ఇవ్వాలి. "
-            "ఈ 800 రూపాయలకి ఒక నెల వాలిడిటీ ఉంటుంది, "
-            "మీకు ఇల్లు దొరికేవరకు."
-        )
-
-    voice_text = (
-        f"నమస్కారం{name_part}! "
-        "మీ బడ్జెట్ ప్రకారం కొన్ని ఇళ్లు దొరికాయి. "
-        "వివరాలు మీకు మెసేజ్ లో పంపాం, చూడండి. "
-        f"{fees_text} "
-        "ఏవైనా ప్రశ్నలు ఉంటే అడగండి."
+    fees_text = (VOICE_FEES_HIGH if budget >= 8000 else VOICE_FEES_LOW).get(
+        lang, VOICE_FEES_HIGH["te"]
     )
-    return voice_text
+
+    intro = {
+        "te": (
+            f"నమస్కారం{name_part}! మీ బడ్జెట్ ప్రకారం కొన్ని ఇళ్లు దొరికాయి. "
+            "వివరాలు మీకు మెసేజ్ లో పంపాం, చూడండి. "
+        ),
+        "en": (
+            f"Hello{name_part}! We found some houses as per your budget. "
+            "Details are in the message, please check. "
+        ),
+        "hi": (
+            f"नमस्ते{name_part}! आपके बजट के अनुसार कुछ घर मिल गए हैं। "
+            "विवरण मैसेज में भेजा है, देख लीजिए। "
+        ),
+        "kn": (
+            f"ನಮಸ್ಕಾರ{name_part}! ನಿಮ್ಮ ಬಜೆಟ್‌ಗೆ ಅನುಗುಣವಾಗಿ ಕೆಲವು ಮನೆಗಳು ಸಿಕ್ಕಿವೆ. "
+            "ವಿವರಗಳನ್ನು ಮೆಸೇಜ್‌ನಲ್ಲಿ ಕಳುಹಿಸಿದ್ದೇವೆ, ನೋಡಿ. "
+        ),
+    }.get(lang, "")
+
+    outro = {
+        "te": " ఏవైనా ప్రశ్నలు ఉంటే అడగండి.",
+        "en": " Any questions, just ask.",
+        "hi": " कोई सवाल हो तो पूछिए।",
+        "kn": " ಯಾವುದೇ ಪ್ರಶ್ನೆ ಇದ್ದರೆ ಕೇಳಿ.",
+    }.get(lang, "")
+
+    return intro + fees_text + outro
 
 
 # ─── FastAPI Web Routes ──────────────────────────────────────────────
 
 @app.get("/")
 def health():
-    return {"status": "ok", "service": "Shiva House Rental Agency Bot v3"}
+    return {"status": "ok", "service": "Shiva House Rental Agency Bot v4"}
 
 
 @app.get("/audio/{uid}")
@@ -809,21 +1176,30 @@ async def whatsapp_webhook(request: Request):
             log_chat("IN", from_number, message_text)
 
         session = get_session(from_number)
+        lang = session.get("lang", "te")
 
         # ── Owner REPLY command: REPLY <number> <message> ──
-        if OWNER_WHATSAPP and from_number == OWNER_WHATSAPP:
+        if is_owner(from_number):
             m = re.match(
-                r"^\s*REPLY\s+(\+?\d{10,14})\s+(.+)$",
+                r"^\s*REPLY\s+([+\d][\d\s\-+]{8,22}?)\s+(.+)$",
                 message_text,
                 re.IGNORECASE | re.DOTALL,
             )
             if m:
-                target = m.group(1)
-                if not target.startswith("+"):
-                    target = "+" + target
+                target = normalize_client_number(m.group(1))
                 reply_body = m.group(2).strip()
-                send(target, reply_body)
-                send(from_number, f"✅ Sent to {target}")
+                ok = send(target, reply_body)
+                if ok:
+                    send(from_number, f"✅ Sent to {target}")
+                else:
+                    send(
+                        from_number,
+                        f"❌ Could not send to {target}. "
+                        "Please check the number. Note: WhatsApp only "
+                        "allows replies within 24 hours of the client's "
+                        "last message to us.",
+                    )
+                save_sessions()
                 return Response(
                     content=str(MessagingResponse()),
                     media_type="text/xml",
@@ -834,7 +1210,8 @@ async def whatsapp_webhook(request: Request):
             "stop", "unsubscribe", "స్టాప్",
         ):
             session["opted_out"] = True
-            send(from_number, OPTED_OUT_MSG)
+            send(from_number, OPTED_OUT_MSG.get(lang, OPTED_OUT_MSG["te"]))
+            save_sessions()
             return Response(
                 content=str(MessagingResponse()),
                 media_type="text/xml",
@@ -844,9 +1221,6 @@ async def whatsapp_webhook(request: Request):
         if session.get("opted_out"):
             session["opted_out"] = False
 
-        is_voice = False
-        lang = "te"
-
         # ── Handle voice note (audio attachment) ──
         if num_media > 0:
             media_url = data.get("MediaUrl0", "")
@@ -854,7 +1228,6 @@ async def whatsapp_webhook(request: Request):
             print(f"Media: {media_type} from {from_number}")
 
             if "audio" in media_type:
-                is_voice = True
                 audio_data = download_twilio_media(media_url)
                 if audio_data:
                     transcribed = transcribe_audio(audio_data, media_type)
@@ -862,12 +1235,16 @@ async def whatsapp_webhook(request: Request):
                         message_text = transcribed
                         print(f"Transcribed: {transcribed[:80]}")
                         log_chat("IN", from_number, f"[VOICE] {transcribed}")
-                        lang = detect_language(transcribed)
+                        detected = detect_language(transcribed)
+                        if detected:
+                            session["lang"] = detected
+                            lang = detected
 
         # ── If no text and no voice, send greeting ──
         if not message_text:
-            send(from_number, GREETING)
-            send_voice_background(from_number, GREETING, lang)
+            send(from_number, GREETING.get(lang, GREETING["te"]))
+            send_voice_background(from_number, GREETING.get(lang, GREETING["te"]), lang)
+            save_sessions()
             return Response(
                 content=str(MessagingResponse()),
                 media_type="text/xml",
@@ -877,6 +1254,12 @@ async def whatsapp_webhook(request: Request):
         extracted = extract_info_with_gemini(message_text, session)
         if not extracted:
             extracted = extract_info_regex(message_text)
+
+        # Language switch (Gemini-detected, e.g. "I don't understand Telugu")
+        if extracted.get("lang") in LANGS:
+            session["lang"] = extracted["lang"]
+            lang = extracted["lang"]
+            print(f"Language: {lang}")
 
         # Update session with newly extracted info
         if extracted.get("name"):
@@ -899,27 +1282,43 @@ async def whatsapp_webhook(request: Request):
                 session["family_type"] = "family"
 
         # ── Check if all info collected ──
-        missing_msg = ask_missing_fields(session)
+        missing_msg = ask_missing_fields(session, lang)
 
         if missing_msg:
             # Still missing some fields — ask for them (text + voice)
             send(from_number, missing_msg)
             send_voice_background(from_number, missing_msg, lang)
-        else:
-            # All fields collected — send complete response in ONE message
+        elif not session.get("full_sent"):
+            # All fields collected — send complete response ONCE
             response_text = build_complete_response(session)
             send(from_number, response_text)
             session["completed"] = True
+            session["full_sent"] = True
 
             # Voice note is COMPULSORY with every reply
             voice_text = build_voice_reply(session)
             send_voice_background(from_number, voice_text, lang)
+        else:
+            # Full package already sent before — NO REPEATS.
+            lower_msg = message_text.lower()
+            if any(k in lower_msg for k in HOUSE_KEYWORDS):
+                # Client asked for houses again — resend house list only
+                # (no fees, no links, no OLX)
+                house_reply = build_house_only_response(session)
+                send(from_number, house_reply)
+                send_voice_background(from_number, house_reply, lang)
+            else:
+                # Short polite reply with contacts only
+                short = SHORT_REPLY.get(lang, SHORT_REPLY["te"])
+                send(from_number, short)
+                send_voice_background(from_number, short, lang)
 
         # ── Email notification to owner (once per conversation) ──
         if not session.get("notified"):
             notify_owner_new_lead(from_number, message_text, session)
             session["notified"] = True
 
+        save_sessions()
         return Response(
             content=str(MessagingResponse()),
             media_type="text/xml",
