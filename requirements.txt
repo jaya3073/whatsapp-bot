@@ -6,3 +6,4 @@ pandas
 openpyxl
 gTTS
 python-multipart
+imageio-ffmpeg==0.6.0
