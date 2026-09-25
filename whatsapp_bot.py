@@ -1309,8 +1309,8 @@ def start_flow(to, session):
         session[field] = False
     session["flow_version"] = 6
     session["flow_started"] = True
-    session["stage"] = "lang"
-    send_buttons(to, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v6")
+    session["lang_chosen"] = True
+    ask_budget(to, session)
 
 
 def ask_budget(to, session):
@@ -1490,8 +1490,8 @@ async def whatsapp_webhook(request: Request):
 
         # ── v5 staged flow: ask the next missing question with buttons ──
         if not session.get("lang_chosen"):
-            session["stage"] = "lang"
-            send_buttons(from_number, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v6")
+            session["lang_chosen"] = True
+            ask_budget(from_number, session)
         elif not session.get("budget"):
             ask_budget(from_number, session)
         elif not session.get("family_type"):
