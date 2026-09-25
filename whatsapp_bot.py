@@ -108,7 +108,7 @@ LANGS = ("te", "en", "hi", "kn")
 def _gemini_model_list():
     """Models to try, in order: configured model first, then fallbacks."""
     models = []
-    for m in [GEMINI_MODEL, "gemini-2.5-flash", "gemini-2.0-flash"]:
+    for m in [GEMINI_MODEL, "gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]:
         if m and m not in models:
             models.append(m)
     return models
@@ -1196,10 +1196,9 @@ def ensure_button_template(key, buttons):
         return None
     try:
         client = Client(TWILIO_SID, TWILIO_TOKEN)
-        content = client.content.v1.contents.create(
-            friendly_name=key,
-            content_type="twilio/quick-reply",
-            content={
+        payload = {
+            "content_type": "twilio/quick-reply",
+            "content": {
                 "twilio/quick-reply": {
                     "body": {"text": "{{1}}"},
                     "actions": [
@@ -1207,11 +1206,19 @@ def ensure_button_template(key, buttons):
                     ],
                 }
             },
-        )
+        }
+        try:
+            content = client.content.v1.contents.create(friendly_name=key, **payload)
+        except TypeError:
+            # Older twilio SDK without friendly_name support
+            content = client.content.v1.contents.create(**payload)
         _content_sids[key] = content.sid
         _save_content_sids()
         print(f"Created content template {key}: {content.sid}")
         return content.sid
+    except AttributeError as e:
+        print(f"Content API unavailable ({key}) - twilio SDK too old: {e}")
+        return None
     except Exception as e:
         print(f"Content template create failed ({key}): {e}")
         return None
@@ -1332,11 +1339,18 @@ def interpret_answer(text, session):
     t = text.strip()
     low = t.lower()
     stage = session.get("stage", "")
-    for word, code in LANG_WORDS.items():
-        if low == word.lower():
-            session["lang"] = code
-            session["lang_chosen"] = True
-            return True
+
+    # Language stage: accept "తెలుగు", "English", "2 English", "1. telugu",
+    # or just "1"/"2"/"3" (numbered fallback menu).
+    if not session.get("lang_chosen"):
+        if stage == "lang" and low in ("1", "2", "3"):
+            low = LANG_BUTTONS[int(low) - 1].lower()
+        clean = re.sub(r"^[\d\s\.\-\)\(]+", "", low).strip()
+        for word, code in LANG_WORDS.items():
+            if clean == word.lower():
+                session["lang"] = code
+                session["lang_chosen"] = True
+                return True
     if not session.get("budget"):
         if t in BUDGET_MAP:
             session["budget"] = BUDGET_MAP[t]
@@ -1346,6 +1360,9 @@ def interpret_answer(text, session):
             session["budget"] = [4000, 6000, 10000][int(low) - 1]
             session["budget_range"] = BUDGET_BUTTONS[int(low) - 1]
             return True
+    if stage == "family" and low in ("1", "2"):
+        session["family_type"] = "family" if low == "1" else "bachelors"
+        return True
     if low in ("family", "ఫ్యామిలీ", "ఫామిలీ", "फैमिली"):
         session["family_type"] = "family"
         return True
