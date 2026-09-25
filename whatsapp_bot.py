@@ -1,4 +1,20 @@
-# whatsapp_bot.py — Shiva House Rental Agency (v4)
+# whatsapp_bot.py — Shiva House Rental Agency (v5)
+#
+# CHANGES IN v5 (compared to v4):
+#   1. WHATSAPP BUTTONS (quick replies): the 5 questions are now asked as
+#      clickable buttons via the Twilio Content API:
+#        (1) Language:  తెలుగు / English / हिंदी
+#        (2) Budget:    ₹3,000-5,000 / ₹5,000-8,000 / ₹8,000-12,000
+#        (3) Family or Bachelors
+#        (4) Members:   1 / 2 / 3
+#        (5) Name:     optional (free text or Skip button)
+#      Clients can still type or send a voice note in any language —
+#      Gemini extraction fills the same fields, buttons are just easier.
+#   2. Numbered text fallback: if Content API templates cannot be created
+#      or sending fails, the same questions go out as numbered menus.
+#   3. Language is fixed at the start via buttons (multi-language bug fix).
+#   4. Recommended: set GEMINI_MODEL=gemini-3.8-flash in Render env.
+#   NOTE: requires twilio>=9 in requirements.txt (for Content API).
 #
 # WhatsApp bot with guided conversation flow, Gemini-powered understanding,
 # voice note support, bachelors filtering, tiered fees, email alerts,
@@ -1153,6 +1169,198 @@ def get_audio(uid: str):
     return Response(content=item["data"], media_type=item["mime"])
 
 
+
+# ─── v5 Button Flow (Twilio Content API quick replies) ──────────────
+CONTENT_SIDS_FILE = "content_sids.json"
+
+try:
+    with open(CONTENT_SIDS_FILE, "r", encoding="utf-8") as f:
+        _content_sids = json.load(f)
+except Exception:
+    _content_sids = {}
+
+
+def _save_content_sids():
+    try:
+        with open(CONTENT_SIDS_FILE, "w", encoding="utf-8") as f:
+            json.dump(_content_sids, f, ensure_ascii=False)
+    except Exception:
+        pass
+
+
+def ensure_button_template(key, buttons):
+    """Create (once) a quick-reply content template, return its SID."""
+    if key in _content_sids:
+        return _content_sids[key]
+    if not (TWILIO_SID and TWILIO_TOKEN):
+        return None
+    try:
+        client = Client(TWILIO_SID, TWILIO_TOKEN)
+        content = client.content.v1.contents.create(
+            friendly_name=key,
+            content_type="twilio/quick-reply",
+            content={
+                "twilio/quick-reply": {
+                    "body": {"text": "{{1}}"},
+                    "actions": [
+                        {"type": "QUICK_REPLY", "title": b} for b in buttons
+                    ],
+                }
+            },
+        )
+        _content_sids[key] = content.sid
+        _save_content_sids()
+        print(f"Created content template {key}: {content.sid}")
+        return content.sid
+    except Exception as e:
+        print(f"Content template create failed ({key}): {e}")
+        return None
+
+
+def send_buttons(to, body_text, buttons, key=None):
+    """Send a quick-reply button message; fall back to numbered text."""
+    sid = ensure_button_template(key, f"btn_{abs(hash(tuple(buttons)))}")
+    if sid:
+        try:
+            client = Client(TWILIO_SID, TWILIO_TOKEN)
+            client.messages.create(
+                from_=f"whatsapp:{WHATSAPP_FROM}",
+                to=f"whatsapp:{to}",
+                content_sid=sid,
+                content_variables=json.dumps({"1": body_text}),
+            )
+            return True
+        except Exception as e:
+            print(f"Button send failed, using text fallback: {e}")
+    numbered = body_text + "\n" + "\n".join(
+        f"{i + 1}. {b}" for i, b in enumerate(buttons)
+    )
+    numbered += "\n(నంబర్ టైప్ చేసి పంపండి / type the number)"
+    return send(to, numbered)
+
+
+# ── Button sets and question texts ──
+LANG_BUTTONS = ["తెలుగు", "English", "हिंदी"]
+WELCOME_TEXT = (
+    "నమస్కారం! 🏠 శివ హౌస్ రెంటల్ ఏజెన్సీకి స్వాగతం!\n"
+    "Hello! Welcome to Shiva House Rental Agency!\n"
+    "नमस्ते! शिवा हाउस रेंटल एजेंसी में आपका स्वागत है!\n\n"
+    "మీ భాష ఎంచుకోండి / Choose your language / अपनी भाषा चुनें:"
+)
+BUDGET_BUTTONS = ["₹3,000-5,000", "₹5,000-8,000", "₹8,000-12,000"]
+BUDGET_MAP = {
+    "₹3,000-5,000": 4000,
+    "₹5,000-8,000": 6000,
+    "₹8,000-12,000": 10000,
+}
+FAMILY_BUTTONS = ["Family", "Bachelors"]
+MEMBERS_BUTTONS = ["1", "2", "3"]
+NAME_BUTTONS = ["Skip"]
+
+BUDGET_Q = {
+    "te": "మీ బడ్జెట్ రేంజ్ ఎంత? (నెలకి అద్దె)",
+    "en": "What is your budget range? (monthly rent)",
+    "hi": "आपकी बजट रेंज क्या है? (मासिक किराया)",
+    "kn": "ನಿಮ್ಮ ಬಜೆಟ್ ವ್ಯಾಪ್ತಿ? (ಮಾಸಿಕ ಬಾಡಿಗೆ)",
+}
+FAMILY_Q = {
+    "te": "మీరు ఫ్యామిలీనా / బ్యాచిలర్స్?",
+    "en": "Family or Bachelors?",
+    "hi": "फैमिली या बैचलर्स?",
+    "kn": "ಫ್ಯಾಮಿಲಿ ಅಥವಾ ಬ್ಯಾಚುಲರ್ಸ್?",
+}
+MEMBERS_Q = {
+    "te": "ఎంతమంది ఉంటారు?",
+    "en": "How many members will stay?",
+    "hi": "कितने लोग रहेंगे?",
+    "kn": "ಎಷ್ಟು ಜನ ಇರುತ್ತಾರೆ?",
+}
+NAME_Q = {
+    "te": "మీ పేరు ఏమిటి? (optional — టైప్ చేయండి లేదా Skip నొక్కండి)",
+    "en": "What is your name? (optional — type it or tap Skip)",
+    "hi": "आपका नाम क्या है? (optional — लिखें या Skip दबाएँ)",
+    "kn": "ನಿಮ್ಮ ಹೆಸರು? (optional)",
+}
+
+LANG_WORDS = {
+    "తెలుగు": "te", "telugu": "te",
+    "english": "en", "ఇంగ్లీష్": "en", "ఆంగ్లం": "en",
+    "हिंदी": "hi", "hindi": "hi",
+}
+
+
+def _q(d, session):
+    return d.get(session.get("lang", "te"), d["te"])
+
+
+def start_flow(to, session):
+    session["flow_started"] = True
+    session["stage"] = "lang"
+    send_buttons(to, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v5")
+
+
+def ask_budget(to, session):
+    session["stage"] = "budget"
+    q = _q(BUDGET_Q, session)
+    send_buttons(to, q, BUDGET_BUTTONS, key="shruti_budget_v5")
+    send_voice_background(to, q, session.get("lang", "te"))
+
+
+def ask_family(to, session):
+    session["stage"] = "family"
+    q = _q(FAMILY_Q, session)
+    send_buttons(to, q, FAMILY_BUTTONS, key="shruti_family_v5")
+    send_voice_background(to, q, session.get("lang", "te"))
+
+
+def ask_members(to, session):
+    session["stage"] = "members"
+    q = _q(MEMBERS_Q, session)
+    send_buttons(to, q, MEMBERS_BUTTONS, key="shruti_members_v5")
+    send_voice_background(to, q, session.get("lang", "te"))
+
+
+def ask_name(to, session):
+    session["stage"] = "name"
+    q = _q(NAME_Q, session)
+    send_buttons(to, q, NAME_BUTTONS, key="shruti_name_v5")
+    send_voice_background(to, q, session.get("lang", "te"))
+
+
+def interpret_answer(text, session):
+    """Interpret button clicks / short typed answers. Updates session."""
+    t = text.strip()
+    low = t.lower()
+    stage = session.get("stage", "")
+    for word, code in LANG_WORDS.items():
+        if low == word.lower():
+            session["lang"] = code
+            session["lang_chosen"] = True
+            return True
+    if not session.get("budget"):
+        if t in BUDGET_MAP:
+            session["budget"] = BUDGET_MAP[t]
+            session["budget_range"] = t
+            return True
+        if low in ("1", "2", "3") and stage == "budget":
+            session["budget"] = [4000, 6000, 10000][int(low) - 1]
+            session["budget_range"] = BUDGET_BUTTONS[int(low) - 1]
+            return True
+    if low in ("family", "ఫ్యామిలీ", "ఫామిలీ", "फैमिली"):
+        session["family_type"] = "family"
+        return True
+    if low in ("bachelors", "bachelor", "బ్యాచిలర్స్", "బేచిలర్స్", "बैचलर्स", "बैचलर"):
+        session["family_type"] = "bachelors"
+        return True
+    if not session.get("count") and low in ("1", "2", "3", "4", "5", "6") and stage == "members":
+        session["count"] = int(low)
+        return True
+    if stage == "name" and low in ("skip", "skip చేయండి", "no name", "వద్దు", "later"):
+        session["name_skipped"] = True
+        return True
+    return False
+
+
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     try:
@@ -1240,26 +1448,29 @@ async def whatsapp_webhook(request: Request):
                             session["lang"] = detected
                             lang = detected
 
-        # ── If no text and no voice, send greeting ──
-        if not message_text:
-            send(from_number, GREETING.get(lang, GREETING["te"]))
-            send_voice_background(from_number, GREETING.get(lang, GREETING["te"]), lang)
+        # ── v5: button-click / short-answer interpretation ──
+        if message_text:
+            interpret_answer(message_text, session)
+        else:
+            # Non-audio media or empty — greet and wait
+            if not session.get("flow_started"):
+                start_flow(from_number, session)
             save_sessions()
             return Response(
                 content=str(MessagingResponse()),
                 media_type="text/xml",
             )
 
-        # ── Extract info from message ──
+        # ── Extract info from message (free text / voice) ──
         extracted = extract_info_with_gemini(message_text, session)
         if not extracted:
             extracted = extract_info_regex(message_text)
 
-        # Language switch (Gemini-detected, e.g. "I don't understand Telugu")
+        # Language switch (Gemini-detected)
         if extracted.get("lang") in LANGS:
             session["lang"] = extracted["lang"]
+            session["lang_chosen"] = True
             lang = extracted["lang"]
-            print(f"Language: {lang}")
 
         # Update session with newly extracted info
         if extracted.get("name"):
@@ -1281,13 +1492,32 @@ async def whatsapp_webhook(request: Request):
             elif "family" in atype:
                 session["family_type"] = "family"
 
-        # ── Check if all info collected ──
-        missing_msg = ask_missing_fields(session, lang)
+        # ── First contact: welcome + language buttons ──
+        if not session.get("flow_started"):
+            start_flow(from_number, session)
+            got_something = session.get("lang_chosen") or any(
+                session.get(k)
+                for k in ("name", "count", "budget", "family_type")
+            )
+            if not got_something:
+                save_sessions()
+                return Response(
+                    content=str(MessagingResponse()),
+                    media_type="text/xml",
+                )
 
-        if missing_msg:
-            # Still missing some fields — ask for them (text + voice)
-            send(from_number, missing_msg)
-            send_voice_background(from_number, missing_msg, lang)
+        # ── v5 staged flow: ask the next missing question with buttons ──
+        if not session.get("lang_chosen"):
+            session["stage"] = "lang"
+            send_buttons(from_number, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v5")
+        elif not session.get("budget"):
+            ask_budget(from_number, session)
+        elif not session.get("family_type"):
+            ask_family(from_number, session)
+        elif not session.get("count"):
+            ask_members(from_number, session)
+        elif not session.get("name") and not session.get("name_skipped"):
+            ask_name(from_number, session)
         elif not session.get("full_sent"):
             # All fields collected — send complete response ONCE
             response_text = build_complete_response(session)
@@ -1303,7 +1533,6 @@ async def whatsapp_webhook(request: Request):
             lower_msg = message_text.lower()
             if any(k in lower_msg for k in HOUSE_KEYWORDS):
                 # Client asked for houses again — resend house list only
-                # (no fees, no links, no OLX)
                 house_reply = build_house_only_response(session)
                 send(from_number, house_reply)
                 send_voice_background(from_number, house_reply, lang)
