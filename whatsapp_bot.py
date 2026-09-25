@@ -988,11 +988,31 @@ def gtts_fallback(text, lang="te"):
         return None
 
 
+def faster_voice(audio):
+    """Increase speaking tempo by 25% while preserving the voice pitch."""
+    try:
+        import subprocess
+        import imageio_ffmpeg
+        result = subprocess.run(
+            [imageio_ffmpeg.get_ffmpeg_exe(), "-hide_banner", "-loglevel", "error",
+             "-i", "pipe:0", "-filter:a", "atempo=1.25", "-codec:a", "libmp3lame",
+             "-b:a", "48k", "-f", "mp3", "pipe:1"],
+            input=audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True, timeout=30,
+        )
+        if result.stdout:
+            return result.stdout
+    except Exception as e:
+        print(f"Voice speed adjustment failed; using original audio: {e}")
+    return audio
+
+
 def send_voice_background(to, text, lang="te"):
     def _run():
         audio = azure_tts_simple(text, lang) or gtts_fallback(text, lang)
         if not audio:
             return
+        audio = faster_voice(audio)
         uid = uuid.uuid4().hex
         audio_store[uid] = {
             "data": audio,
