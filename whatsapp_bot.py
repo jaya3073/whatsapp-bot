@@ -1,4 +1,4 @@
-# whatsapp_bot.py — Shiva House Rental Agency (v5)
+# whatsapp_bot.py — Shiva House Rental Agency (v6: strict sequential questions)
 #
 # CHANGES IN v5 (compared to v4):
 #   1. WHATSAPP BUTTONS (quick replies): the 5 questions are now asked as
@@ -1195,27 +1195,28 @@ def ensure_button_template(key, buttons):
     if not (TWILIO_SID and TWILIO_TOKEN):
         return None
     try:
-        client = Client(TWILIO_SID, TWILIO_TOKEN)
         payload = {
-            "content_type": "twilio/quick-reply",
-            "content": {
-                "twilio/quick-reply": {
-                    "body": {"text": "{{1}}"},
-                    "actions": [
-                        {"type": "QUICK_REPLY", "title": b} for b in buttons
-                    ],
-                }
-            },
+            "friendly_name": key,
+            "language": "en",
+            "variables": {"1": "Choose an option"},
+            "types": {"twilio/quick-reply": {
+                "body": "{{1}}",
+                "actions": [{"title": b, "id": b} for b in buttons],
+            }},
         }
-        try:
-            content = client.content.v1.contents.create(friendly_name=key, **payload)
-        except TypeError:
-            # Older twilio SDK without friendly_name support
-            content = client.content.v1.contents.create(**payload)
-        _content_sids[key] = content.sid
+        auth = base64.b64encode(f"{TWILIO_SID}:{TWILIO_TOKEN}".encode()).decode()
+        request = urllib.request.Request(
+            "https://content.twilio.com/v1/Content",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            content_sid = json.load(response)["sid"]
+        _content_sids[key] = content_sid
         _save_content_sids()
-        print(f"Created content template {key}: {content.sid}")
-        return content.sid
+        print(f"Created content template {key}: {content_sid}")
+        return content_sid
     except AttributeError as e:
         print(f"Content API unavailable ({key}) - twilio SDK too old: {e}")
         return None
@@ -1226,7 +1227,7 @@ def ensure_button_template(key, buttons):
 
 def send_buttons(to, body_text, buttons, key=None):
     """Send a quick-reply button message; fall back to numbered text."""
-    sid = ensure_button_template(key, f"btn_{abs(hash(tuple(buttons)))}")
+    sid = ensure_button_template(key or f"btn_{abs(hash(tuple(buttons)))}", buttons)
     if sid:
         try:
             client = Client(TWILIO_SID, TWILIO_TOKEN)
@@ -1301,80 +1302,88 @@ def _q(d, session):
 
 
 def start_flow(to, session):
+    # Clear earlier answers so every restarted enquiry follows all five steps.
+    for field in ("name", "count", "budget", "family_type", "budget_range"):
+        session[field] = None
+    for field in ("lang_chosen", "name_skipped", "completed", "full_sent", "notified"):
+        session[field] = False
+    session["flow_version"] = 6
     session["flow_started"] = True
     session["stage"] = "lang"
-    send_buttons(to, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v5")
+    send_buttons(to, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v6")
 
 
 def ask_budget(to, session):
     session["stage"] = "budget"
     q = _q(BUDGET_Q, session)
-    send_buttons(to, q, BUDGET_BUTTONS, key="shruti_budget_v5")
+    send_buttons(to, q, BUDGET_BUTTONS, key="shruti_budget_v6")
     send_voice_background(to, q, session.get("lang", "te"))
 
 
 def ask_family(to, session):
     session["stage"] = "family"
     q = _q(FAMILY_Q, session)
-    send_buttons(to, q, FAMILY_BUTTONS, key="shruti_family_v5")
+    send_buttons(to, q, FAMILY_BUTTONS, key="shruti_family_v6")
     send_voice_background(to, q, session.get("lang", "te"))
 
 
 def ask_members(to, session):
     session["stage"] = "members"
     q = _q(MEMBERS_Q, session)
-    send_buttons(to, q, MEMBERS_BUTTONS, key="shruti_members_v5")
+    send_buttons(to, q, MEMBERS_BUTTONS, key="shruti_members_v6")
     send_voice_background(to, q, session.get("lang", "te"))
 
 
 def ask_name(to, session):
     session["stage"] = "name"
     q = _q(NAME_Q, session)
-    send_buttons(to, q, NAME_BUTTONS, key="shruti_name_v5")
+    send_buttons(to, q, NAME_BUTTONS, key="shruti_name_v6")
     send_voice_background(to, q, session.get("lang", "te"))
 
 
 def interpret_answer(text, session):
-    """Interpret button clicks / short typed answers. Updates session."""
+    """Only consume an answer for the currently displayed question."""
     t = text.strip()
     low = t.lower()
     stage = session.get("stage", "")
-
-    # Language stage: accept "తెలుగు", "English", "2 English", "1. telugu",
-    # or just "1"/"2"/"3" (numbered fallback menu).
-    if not session.get("lang_chosen"):
-        if stage == "lang" and low in ("1", "2", "3"):
+    if stage == "lang":
+        if low in ("1", "2", "3"):
             low = LANG_BUTTONS[int(low) - 1].lower()
-        clean = re.sub(r"^[\d\s\.\-\)\(]+", "", low).strip()
-        for word, code in LANG_WORDS.items():
-            if clean == word.lower():
-                session["lang"] = code
-                session["lang_chosen"] = True
-                return True
-    if not session.get("budget"):
+        clean = re.sub(r"^[\d\s.\-)(]+", "", low).strip()
+        if clean in LANG_WORDS:
+            session["lang"] = LANG_WORDS[clean]
+            session["lang_chosen"] = True
+            return True
+    elif stage == "budget":
+        if low in ("1", "2", "3"):
+            t = BUDGET_BUTTONS[int(low) - 1]
         if t in BUDGET_MAP:
             session["budget"] = BUDGET_MAP[t]
             session["budget_range"] = t
             return True
-        if low in ("1", "2", "3") and stage == "budget":
-            session["budget"] = [4000, 6000, 10000][int(low) - 1]
-            session["budget_range"] = BUDGET_BUTTONS[int(low) - 1]
+        amount = re.fullmatch(r"(?:₹|rs\.?\s*)?([0-9,]+)", low)
+        if amount and int(amount[1].replace(",", "")) >= 1000:
+            session["budget"] = int(amount[1].replace(",", ""))
             return True
-    if stage == "family" and low in ("1", "2"):
-        session["family_type"] = "family" if low == "1" else "bachelors"
-        return True
-    if low in ("family", "ఫ్యామిలీ", "ఫామిలీ", "फैमिली"):
-        session["family_type"] = "family"
-        return True
-    if low in ("bachelors", "bachelor", "బ్యాచిలర్స్", "బేచిలర్స్", "बैचलर्स", "बैचलर"):
-        session["family_type"] = "bachelors"
-        return True
-    if not session.get("count") and low in ("1", "2", "3", "4", "5", "6") and stage == "members":
-        session["count"] = int(low)
-        return True
-    if stage == "name" and low in ("skip", "skip చేయండి", "no name", "వద్దు", "later"):
-        session["name_skipped"] = True
-        return True
+    elif stage == "family":
+        if low in ("1", "family", "ఫ్యామిలీ", "ఫామిలీ", "फैमिली"):
+            session["family_type"] = "family"
+            return True
+        if low in ("2", "bachelors", "bachelor", "బ్యాచిలర్స్", "బేచిలర్స్", "बैचलर्स", "बैचलर"):
+            session["family_type"] = "bachelors"
+            return True
+    elif stage == "members":
+        match = re.fullmatch(r"([1-9][0-9]?)\s*(?:members?|people|persons?|మంది|लोग)?", low)
+        if match:
+            session["count"] = int(match[1])
+            return True
+    elif stage == "name":
+        if low in ("1", "skip", "skip చేయండి", "no name", "వద్దు", "later"):
+            session["name_skipped"] = True
+            return True
+        if t and any(c.isalpha() for c in t):
+            session["name"] = t
+            return True
     return False
 
 
@@ -1461,72 +1470,28 @@ async def whatsapp_webhook(request: Request):
                         print(f"Transcribed: {transcribed[:80]}")
                         log_chat("IN", from_number, f"[VOICE] {transcribed}")
                         detected = detect_language(transcribed)
-                        if detected:
+                        if detected and not session.get("lang_chosen"):
                             session["lang"] = detected
                             lang = detected
 
-        # ── v5: button-click / short-answer interpretation ──
-        if message_text:
-            interpret_answer(message_text, session)
-        else:
-            # Non-audio media or empty — greet and wait
-            if not session.get("flow_started"):
-                start_flow(from_number, session)
-            save_sessions()
-            return Response(
-                content=str(MessagingResponse()),
-                media_type="text/xml",
-            )
-
-        # ── Extract info from message (free text / voice) ──
-        extracted = extract_info_with_gemini(message_text, session)
-        if not extracted:
-            extracted = extract_info_regex(message_text)
-
-        # Language switch (Gemini-detected)
-        if extracted.get("lang") in LANGS:
-            session["lang"] = extracted["lang"]
-            session["lang_chosen"] = True
-            lang = extracted["lang"]
-
-        # Update session with newly extracted info
-        if extracted.get("name"):
-            session["name"] = str(extracted["name"]).strip()
-        if extracted.get("count"):
-            try:
-                session["count"] = int(extracted["count"])
-            except (ValueError, TypeError):
-                pass
-        if extracted.get("budget"):
-            try:
-                session["budget"] = int(extracted["budget"])
-            except (ValueError, TypeError):
-                pass
-        if extracted.get("accommodation_type"):
-            atype = str(extracted["accommodation_type"]).lower().strip()
-            if "bachelor" in atype:
-                session["family_type"] = "bachelors"
-            elif "family" in atype:
-                session["family_type"] = "family"
-
-        # ── First contact: welcome + language buttons ──
-        if not session.get("flow_started"):
+        # Start/restart before interpreting input; greetings are never field values.
+        restart = message_text.casefold().strip(" !.,") in (
+            "hi", "hello", "hey", "start", "restart", "నమస్కారం", "నమస్తే", "नमस्ते",
+        )
+        if (restart or not session.get("flow_started")
+                or (session.get("flow_version") != 6 and not session.get("full_sent"))):
             start_flow(from_number, session)
-            got_something = session.get("lang_chosen") or any(
-                session.get(k)
-                for k in ("name", "count", "budget", "family_type")
-            )
-            if not got_something:
-                save_sessions()
-                return Response(
-                    content=str(MessagingResponse()),
-                    media_type="text/xml",
-                )
+            save_sessions()
+            return Response(content=str(MessagingResponse()), media_type="text/xml")
+
+        if not session.get("full_sent"):
+            interpret_answer(message_text, session)
+        lang = session.get("lang", "te")
 
         # ── v5 staged flow: ask the next missing question with buttons ──
         if not session.get("lang_chosen"):
             session["stage"] = "lang"
-            send_buttons(from_number, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v5")
+            send_buttons(from_number, WELCOME_TEXT, LANG_BUTTONS, key="shruti_lang_v6")
         elif not session.get("budget"):
             ask_budget(from_number, session)
         elif not session.get("family_type"):
